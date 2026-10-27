@@ -74,6 +74,9 @@ flowchart LR
 ### 마감
 - 정산월은 `OPEN`, `CLOSED` 두 상태입니다.
 - `OPEN` 상태에서는 미리보기(재계산)를 몇 번이든 실행할 수 있고, 실행할 때마다 해당 월 결과를 지우고 새로 만듭니다.
+- 미리보기는 이번 달까지, 마감은 **지난달까지만** 할 수 있습니다. 진행 중인 달을 마감하면 남은 기간의 출고·반품을 받을 수 없기 때문입니다. 마감 전에는 미리보기를 한 번 이상 실행해야 합니다.
+- 마감할 때도 프로시저가 최신 데이터로 다시 계산한 뒤 닫습니다. 미리보기 이후에 들어온 반품이 빠지지 않습니다.
+- 출고일에 적용할 리베이트 정책이 없는 주문이 있으면 정산을 중단합니다. 조인에서 조용히 빠지면 금액이 틀린 채로 마감되기 때문입니다.
 - `CLOSED`가 되면 재실행할 수 없고, 그 월에 해당하는 출고·반품 데이터도 등록하거나 수정할 수 없습니다.
 - 같은 월을 두 명이 동시에 마감하지 못하도록 정산월 행에 잠금을 겁니다.
 
@@ -322,7 +325,8 @@ $$;
 ### 호출 시 주의
 - 프로시저 안에서 `COMMIT`하지 않습니다. 트랜잭션은 Spring `@Transactional`이 관리합니다.
 - MyBatis에서는 JDBC escape 문법(`{call ...}`) 대신 `CALL run_settlement(#{yyyymm}, #{userId}, #{close})`를 그대로 실행합니다. PgJDBC는 기본 설정에서 `{call}`을 함수 호출로 바꾸기 때문에 프로시저 호출이 실패할 수 있습니다.
-- 실패 로그는 롤백되면 같이 사라지므로, 실패 기록은 서비스 계층에서 별도 트랜잭션(`REQUIRES_NEW`)으로 남깁니다.
+- 실패는 `settlement_run_log`에 남기지 않고 애플리케이션 로그(WARN)로 남깁니다. 처음에는 별도 트랜잭션(`REQUIRES_NEW`)으로 실패 행을 넣으려 했는데, 실패 로그도 정산월 행을 참조해야 해서 바깥 트랜잭션이 잡고 있는(아직 커밋 전인) 정산월 행을 기다리게 됩니다. 바깥 트랜잭션은 안쪽이 끝나기를 기다리므로 서로 기다리는 상태가 되고, 둘 다 같은 애플리케이션 스레드라 DB가 교착으로 감지하지도 못합니다.
+- 서비스에서 먼저 마감 여부를 확인해서, 흔한 실패(이미 마감된 월)는 프로시저를 호출하기 전에 친절한 메시지로 돌려줍니다. 프로시저 안의 검사는 동시에 마감하는 경우를 위한 안전장치입니다.
 
 ---
 
@@ -333,7 +337,8 @@ $$;
 | 같은 상품 주문을 동시에 승인 | `UPDATE product SET stock_qty = stock_qty - :qty WHERE id = :id AND stock_qty >= :qty` 실행 후 영향 행이 0이면 재고 부족으로 승인 실패 |
 | 같은 주문을 두 관리자가 동시에 처리 | `sales_order.version` 낙관적 잠금. 충돌 시 "다른 사용자가 먼저 처리했습니다" 응답 |
 | 같은 월을 동시에 마감 | 프로시저에서 `settlement_period` 행을 `FOR UPDATE`로 잠금 |
-| 마감월 데이터 변경 | 서비스에서 1차 검증, `sales_return` 등록 트리거로 2차 차단 |
+| 마감월 데이터 변경 | 서비스에서 1차 검증, `sales_return`·`sales_order` 트리거로 2차 차단 |
+| 같은 주문 줄을 동시에 반품 | 주문 줄을 `FOR UPDATE`로 잠근 뒤, **별도 문장**으로 반품 합계를 조회 (READ COMMITTED에서는 문장마다 새 스냅샷을 쓰므로 잠금 대기 중 커밋된 반품까지 보임) |
 
 k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고, 승인 건수와 남은 재고가 맞는지 확인합니다.
 
@@ -383,8 +388,8 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 | POST | `/api/admin/settlements/{yyyymm}/preview` | 미리보기 실행 |
 | POST | `/api/admin/settlements/{yyyymm}/close` | 마감 실행 |
 | GET | `/api/admin/settlements/{yyyymm}/partners/{partnerId}` | 거래처 정산 상세 |
-| GET | `/api/admin/settlements/{yyyymm}/excel` | 엑셀 다운로드 |
-| GET | `/api/admin/settlements/runs` | 실행 이력 |
+| GET | `/api/admin/settlements/{yyyymm}/csv` | CSV 다운로드 (UTF-8 BOM, 엑셀에서 바로 열림) |
+| GET | `/api/admin/orders/status-counts` | 상태별 주문 건수 |
 
 ---
 
@@ -401,7 +406,7 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 | 관리 | `/admin/products` | 상품 관리 | 그리드 + 등록·수정 모달 |
 | 관리 | `/admin/partners` | 거래처 관리 | 등급 변경 |
 | 관리 | `/admin/rebate-policies` | 리베이트 정책 | 등급별 적용 기간 타임라인 |
-| 관리 | `/admin/settlements` | 월 정산 | 월 선택, 미리보기·마감 버튼, 거래처별 합계 그리드, 엑셀 |
+| 관리 | `/admin/settlements` | 월 정산 | 월 선택, 미리보기·마감 버튼, 거래처별 합계 표, CSV |
 | 관리 | `/admin/settlements/:yyyymm/:partnerId` | 정산 상세 | 출고·반품 라인별 금액과 적용 요율 |
 
 ---

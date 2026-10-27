@@ -5,6 +5,9 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:minierp}
     username: ${DB_USER:minierp}
     password: ${DB_PASSWORD:minierp}
+    hikari:
+      # DB 세션 시간대를 한국 시간으로 맞춰 now(), 날짜 비교 결과가 서버 위치와 무관하게 같도록 한다
+      connection-init-sql: SET TIME ZONE 'Asia/Seoul'
 
 server:
   servlet:

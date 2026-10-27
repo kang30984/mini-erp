@@ -26,6 +26,7 @@
             <arg   column="ordered_at"         javaType="java.time.LocalDateTime"/>
             <arg   column="approved_at"        javaType="java.time.LocalDateTime"/>
             <arg   column="shipped_at"         javaType="java.time.LocalDateTime"/>
+            <arg   column="version"            javaType="java.lang.Integer"/>
         </constructor>
     </resultMap>
 
@@ -38,6 +39,20 @@
             <arg column="qty"          javaType="java.lang.Integer"/>
             <arg column="unit_price"   javaType="java.math.BigDecimal"/>
             <arg column="amount"       javaType="java.math.BigDecimal"/>
+            <arg column="returned_qty" javaType="java.lang.Integer"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="returnRow" type="io.github.kang30984.minierp.order.OrderReturnResponse">
+        <constructor>
+            <idArg column="id"              javaType="java.lang.Long"/>
+            <arg   column="line_no"         javaType="java.lang.Integer"/>
+            <arg   column="product_name"    javaType="java.lang.String"/>
+            <arg   column="qty"             javaType="java.lang.Integer"/>
+            <arg   column="amount"          javaType="java.math.BigDecimal"/>
+            <arg   column="reason"          javaType="java.lang.String"/>
+            <arg   column="created_by_name" javaType="java.lang.String"/>
+            <arg   column="returned_at"     javaType="java.time.LocalDateTime"/>
         </constructor>
     </resultMap>
 
@@ -110,7 +125,7 @@
 
     <select id="findHeader" resultMap="header">
         SELECT o.id, o.order_no, o.partner_id, p.name AS partner_name, o.partner_grade_code,
-               o.status, o.total_amount, o.ordered_at, o.approved_at, o.shipped_at
+               o.status, o.total_amount, o.ordered_at, o.approved_at, o.shipped_at, o.version
           FROM sales_order o
           JOIN partner p ON p.id = o.partner_id
          WHERE o.id = #{orderId}
@@ -120,11 +135,23 @@
     </select>
 
     <select id="findItems" resultMap="item">
-        SELECT i.line_no, i.product_id, p.sku, p.name AS product_name, i.qty, i.unit_price, i.amount
+        SELECT i.line_no, i.product_id, p.sku, p.name AS product_name, i.qty, i.unit_price, i.amount,
+               (SELECT COALESCE(SUM(r.qty), 0) FROM sales_return r WHERE r.order_item_id = i.id) AS returned_qty
           FROM sales_order_item i
           JOIN product p ON p.id = i.product_id
          WHERE i.order_id = #{orderId}
          ORDER BY i.line_no
+    </select>
+
+    <select id="findReturns" resultMap="returnRow">
+        SELECT r.id, i.line_no, p.name AS product_name, r.qty, r.amount, r.reason,
+               u.name AS created_by_name, r.returned_at
+          FROM sales_return r
+          JOIN sales_order_item i ON i.id = r.order_item_id
+          JOIN product p          ON p.id = i.product_id
+          JOIN app_user u         ON u.id = r.created_by
+         WHERE i.order_id = #{orderId}
+         ORDER BY r.returned_at, r.id
     </select>
 
     <select id="findHistories" resultMap="history">

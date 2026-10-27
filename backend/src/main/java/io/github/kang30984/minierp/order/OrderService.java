@@ -26,11 +26,14 @@ public class OrderService {
     private final OrderMapper orderMapper;
     private final ProductMapper productMapper;
     private final PartnerMapper partnerMapper;
+    private final OrderDetailLoader detailLoader;
 
-    public OrderService(OrderMapper orderMapper, ProductMapper productMapper, PartnerMapper partnerMapper) {
+    public OrderService(OrderMapper orderMapper, ProductMapper productMapper, PartnerMapper partnerMapper,
+                        OrderDetailLoader detailLoader) {
         this.orderMapper = orderMapper;
         this.productMapper = productMapper;
         this.partnerMapper = partnerMapper;
+        this.detailLoader = detailLoader;
     }
 
     /**
@@ -79,7 +82,7 @@ public class OrderService {
         orderMapper.insertItems(order.getId(), items);
         orderMapper.insertHistory(order.getId(), null, OrderStatus.REQUESTED.name(), null, user.id());
 
-        return detail(order.getId(), partner.id());
+        return detailLoader.load(order.getId(), partner.id());
     }
 
     public PageResponse<OrderSummaryResponse> myOrders(AppUser user, String status, PageParams page) {
@@ -94,7 +97,7 @@ public class OrderService {
     }
 
     public OrderDetailResponse myOrder(AppUser user, long orderId) {
-        return detail(orderId, requirePartnerId(user));
+        return detailLoader.load(orderId, requirePartnerId(user));
     }
 
     /**
@@ -109,20 +112,13 @@ public class OrderService {
         int updated = orderMapper.cancelRequested(orderId, partnerId);
         if (updated == 0) {
             OrderHeader header = orderMapper.findHeader(orderId, partnerId)
-                    .orElseThrow(OrderService::orderNotFound);
+                    .orElseThrow(OrderDetailLoader::orderNotFound);
             throw BusinessException.conflict("NOT_CANCELABLE",
                     "요청 상태인 주문만 취소할 수 있습니다. 현재 상태: " + header.status());
         }
         orderMapper.insertHistory(orderId, OrderStatus.REQUESTED.name(), OrderStatus.CANCELED.name(),
                 "거래처 취소", user.id());
-        return detail(orderId, partnerId);
-    }
-
-    private OrderDetailResponse detail(long orderId, Long partnerId) {
-        // 다른 거래처 주문은 403이 아니라 404로 응답한다. 주문이 존재한다는 사실 자체를 알려 주지 않기 위해서다.
-        OrderHeader header = orderMapper.findHeader(orderId, partnerId)
-                .orElseThrow(OrderService::orderNotFound);
-        return OrderDetailResponse.of(header, orderMapper.findItems(orderId), orderMapper.findHistories(orderId));
+        return detailLoader.load(orderId, partnerId);
     }
 
     private PartnerResponse activePartner(AppUser user) {
@@ -140,9 +136,5 @@ public class OrderService {
             throw BusinessException.forbidden("PARTNER_ONLY", "거래처 사용자만 이용할 수 있습니다.");
         }
         return user.partnerId();
-    }
-
-    private static BusinessException orderNotFound() {
-        return BusinessException.notFound("주문을 찾을 수 없습니다.");
     }
 }

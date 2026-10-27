@@ -13,6 +13,7 @@ public record OrderHeader(
         BigDecimal totalAmount,
         LocalDateTime orderedAt,
         LocalDateTime approvedAt,
-        LocalDateTime shippedAt
+        LocalDateTime shippedAt,
+        Integer version
 ) {
 }

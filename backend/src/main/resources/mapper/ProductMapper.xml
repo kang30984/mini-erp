@@ -72,6 +72,21 @@
         VALUES (#{sku}, #{name}, #{category}, #{unitPrice}, #{stockQty}, #{status})
     </insert>
 
+    <update id="decreaseStock">
+        UPDATE product
+           SET stock_qty  = stock_qty - #{qty},
+               updated_at = now()
+         WHERE id = #{productId}
+           AND stock_qty &gt;= #{qty}
+    </update>
+
+    <update id="increaseStock">
+        UPDATE product
+           SET stock_qty  = stock_qty + #{qty},
+               updated_at = now()
+         WHERE id = #{productId}
+    </update>
+
     <update id="update">
         UPDATE product
            SET name       = #{name},

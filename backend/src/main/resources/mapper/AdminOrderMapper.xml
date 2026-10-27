@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.kang30984.minierp.order.admin.AdminOrderMapper">
+
+    <resultMap id="summary" type="io.github.kang30984.minierp.order.admin.AdminOrderSummary">
+        <constructor>
+            <idArg column="id"                 javaType="java.lang.Long"/>
+            <arg   column="order_no"           javaType="java.lang.String"/>
+            <arg   column="partner_name"       javaType="java.lang.String"/>
+            <arg   column="status"             javaType="java.lang.String"/>
+            <arg   column="total_amount"       javaType="java.math.BigDecimal"/>
+            <arg   column="item_count"         javaType="java.lang.Integer"/>
+            <arg   column="first_product_name" javaType="java.lang.String"/>
+            <arg   column="ordered_at"         javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="statusCount" type="io.github.kang30984.minierp.order.admin.StatusCount">
+        <constructor>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="cnt"    javaType="java.lang.Long"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="returnTarget" type="io.github.kang30984.minierp.order.admin.ReturnTarget">
+        <constructor>
+            <idArg column="id"         javaType="java.lang.Long"/>
+            <arg   column="product_id" javaType="java.lang.Long"/>
+            <arg   column="qty"        javaType="java.lang.Integer"/>
+            <arg   column="unit_price" javaType="java.math.BigDecimal"/>
+        </constructor>
+    </resultMap>
+
+    <!-- 주문일 조건은 to를 포함하도록 다음 날 0시 미만으로 비교한다 -->
+    <sql id="searchCondition">
+        <where>
+            <if test="keyword != null">
+                AND (o.order_no ILIKE #{keyword} OR p.name ILIKE #{keyword})
+            </if>
+            <if test="status != null">
+                AND o.status = #{status}
+            </if>
+            <if test="from != null">
+                AND o.ordered_at &gt;= #{from}
+            </if>
+            <if test="to != null">
+                AND o.ordered_at &lt; (#{to}::date + 1)
+            </if>
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM sales_order o
+          JOIN partner p ON p.id = o.partner_id
+        <include refid="searchCondition"/>
+    </select>
+
+    <select id="search" resultMap="summary">
+        SELECT o.id,
+               o.order_no,
+               p.name AS partner_name,
+               o.status,
+               o.total_amount,
+               (SELECT count(*) FROM sales_order_item i WHERE i.order_id = o.id) AS item_count,
+               (SELECT pr.name
+                  FROM sales_order_item i
+                  JOIN product pr ON pr.id = i.product_id
+                 WHERE i.order_id = o.id
+                 ORDER BY i.line_no
+                 LIMIT 1) AS first_product_name,
+               o.ordered_at
+          FROM sales_order o
+          JOIN partner p ON p.id = o.partner_id
+        <include refid="searchCondition"/>
+         ORDER BY o.ordered_at DESC, o.id DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByStatus" resultMap="statusCount">
+        SELECT status, count(*) AS cnt FROM sales_order GROUP BY status
+    </select>
+
+    <update id="transition">
+        UPDATE sales_order
+           SET status  = #{toStatus},
+               version = version + 1
+        <if test="toStatus == 'APPROVED'">
+             , approved_at = now()
+        </if>
+        <if test="toStatus == 'SHIPPED'">
+             , shipped_at = now()
+        </if>
+         WHERE id = #{orderId}
+           AND status = #{fromStatus}
+           AND version = #{version}
+    </update>
+
+    <!-- 잠금 조회는 세션 캐시를 거치지 않도록 매번 DB에서 실행 -->
+    <select id="findReturnTargetForUpdate" resultMap="returnTarget" flushCache="true" useCache="false">
+        SELECT i.id, i.product_id, i.qty, i.unit_price
+          FROM sales_order_item i
+         WHERE i.order_id = #{orderId}
+           AND i.line_no = #{lineNo}
+           FOR UPDATE
+    </select>
+
+    <select id="sumReturnedQty" resultType="int" flushCache="true" useCache="false">
+        SELECT COALESCE(SUM(qty), 0) FROM sales_return WHERE order_item_id = #{orderItemId}
+    </select>
+
+    <insert id="insertReturn">
+        INSERT INTO sales_return (order_item_id, qty, amount, reason, created_by)
+        VALUES (#{orderItemId}, #{qty}, #{amount}, #{reason}, #{createdBy})
+    </insert>
+</mapper>

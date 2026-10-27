@@ -35,6 +35,11 @@ public interface ProductMapper {
                 @Param("stockQty") int stockQty,
                 @Param("status") String status);
 
+    /** 재고가 충분할 때만 차감한다. 영향받은 행이 0이면 재고 부족 */
+    int decreaseStock(@Param("productId") long productId, @Param("qty") int qty);
+
+    int increaseStock(@Param("productId") long productId, @Param("qty") int qty);
+
     int update(@Param("id") long id,
                @Param("name") String name,
                @Param("category") String category,

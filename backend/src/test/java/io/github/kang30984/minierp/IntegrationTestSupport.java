@@ -4,7 +4,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -71,5 +73,43 @@ public abstract class IntegrationTestSupport {
 
     protected long productId(String sku) {
         return jdbcTemplate.queryForObject("SELECT id FROM product WHERE sku = ?", Long.class, sku);
+    }
+
+    protected int stockOf(String sku) {
+        return jdbcTemplate.queryForObject("SELECT stock_qty FROM product WHERE sku = ?", Integer.class, sku);
+    }
+
+    protected JsonNode readJson(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    /** 거래처로 한 품목 주문을 넣고 주문 상세를 돌려준다 */
+    protected JsonNode placeOrder(MockHttpSession partner, String sku, int qty) throws Exception {
+        Map<String, Object> body = Map.of("items", List.of(Map.of("productId", productId(sku), "qty", qty)));
+        MvcResult result = mvc.perform(post("/api/market/orders").with(csrf()).session(partner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return readJson(result);
+    }
+
+    /** 관리자 처리(approve, reject, ship, cancel)를 성공시키고 갱신된 주문 상세를 돌려준다 */
+    protected JsonNode adminAction(MockHttpSession admin, JsonNode order, String action) throws Exception {
+        MvcResult result = mvc.perform(post("/api/admin/orders/{id}/{action}", order.get("id").asLong(), action)
+                        .with(csrf()).session(admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("version", order.get("version").asInt(), "reason", "테스트"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        return readJson(result);
+    }
+
+    /** 주문 → 승인 → 출고까지 진행 */
+    protected JsonNode shippedOrder(MockHttpSession partner, MockHttpSession admin, String sku, int qty)
+            throws Exception {
+        JsonNode order = placeOrder(partner, sku, qty);
+        order = adminAction(admin, order, "approve");
+        return adminAction(admin, order, "ship");
     }
 }

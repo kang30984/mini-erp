@@ -32,6 +32,8 @@ public interface OrderMapper {
 
     List<OrderItemResponse> findItems(@Param("orderId") long orderId);
 
+    List<OrderReturnResponse> findReturns(@Param("orderId") long orderId);
+
     List<OrderHistoryResponse> findHistories(@Param("orderId") long orderId);
 
     int cancelRequested(@Param("orderId") long orderId, @Param("partnerId") long partnerId);

@@ -15,14 +15,16 @@ public record OrderDetailResponse(
         LocalDateTime orderedAt,
         LocalDateTime approvedAt,
         LocalDateTime shippedAt,
+        Integer version,
         List<OrderItemResponse> items,
+        List<OrderReturnResponse> returns,
         List<OrderHistoryResponse> histories
 ) {
 
     static OrderDetailResponse of(OrderHeader h, List<OrderItemResponse> items,
-                                  List<OrderHistoryResponse> histories) {
+                                  List<OrderReturnResponse> returns, List<OrderHistoryResponse> histories) {
         return new OrderDetailResponse(h.id(), h.orderNo(), h.partnerId(), h.partnerName(),
                 h.partnerGradeCode(), h.status(), h.totalAmount(), h.orderedAt(), h.approvedAt(),
-                h.shippedAt(), items, histories);
+                h.shippedAt(), h.version(), items, returns, histories);
     }
 }

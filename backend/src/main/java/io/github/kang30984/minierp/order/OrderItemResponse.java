@@ -9,6 +9,7 @@ public record OrderItemResponse(
         String productName,
         Integer qty,
         BigDecimal unitPrice,
-        BigDecimal amount
+        BigDecimal amount,
+        Integer returnedQty
 ) {
 }

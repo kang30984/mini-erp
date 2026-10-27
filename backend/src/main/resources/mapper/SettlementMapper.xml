@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.kang30984.minierp.settlement.SettlementMapper">
+
+    <resultMap id="period" type="io.github.kang30984.minierp.settlement.SettlementPeriod">
+        <constructor>
+            <idArg column="yyyymm"         javaType="java.lang.String"/>
+            <arg   column="status"         javaType="java.lang.String"/>
+            <arg   column="closed_at"      javaType="java.time.LocalDateTime"/>
+            <arg   column="closed_by_name" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="summary" type="io.github.kang30984.minierp.settlement.SettlementSummary">
+        <constructor>
+            <idArg column="partner_id"    javaType="java.lang.Long"/>
+            <arg   column="partner_code"  javaType="java.lang.String"/>
+            <arg   column="partner_name"  javaType="java.lang.String"/>
+            <arg   column="ship_amount"   javaType="java.math.BigDecimal"/>
+            <arg   column="return_amount" javaType="java.math.BigDecimal"/>
+            <arg   column="net_amount"    javaType="java.math.BigDecimal"/>
+            <arg   column="rebate_amount" javaType="java.math.BigDecimal"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="detail" type="io.github.kang30984.minierp.settlement.SettlementDetail">
+        <constructor>
+            <arg column="source_type"   javaType="java.lang.String"/>
+            <arg column="order_no"      javaType="java.lang.String"/>
+            <arg column="line_no"       javaType="java.lang.Integer"/>
+            <arg column="product_name"  javaType="java.lang.String"/>
+            <arg column="qty"           javaType="java.lang.Integer"/>
+            <arg column="amount"        javaType="java.math.BigDecimal"/>
+            <arg column="rebate_rate"   javaType="java.math.BigDecimal"/>
+            <arg column="rebate_amount" javaType="java.math.BigDecimal"/>
+            <arg column="occurred_at"   javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="run" type="io.github.kang30984.minierp.settlement.SettlementRun">
+        <constructor>
+            <idArg column="id"          javaType="java.lang.Long"/>
+            <arg   column="yyyymm"      javaType="java.lang.String"/>
+            <arg   column="run_type"    javaType="java.lang.String"/>
+            <arg   column="row_count"   javaType="java.lang.Integer"/>
+            <arg   column="elapsed_ms"  javaType="java.lang.Integer"/>
+            <arg   column="result"      javaType="java.lang.String"/>
+            <arg   column="run_by_name" javaType="java.lang.String"/>
+            <arg   column="run_at"      javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findPeriod" resultMap="period" flushCache="true" useCache="false">
+        SELECT sp.yyyymm, sp.status, sp.closed_at, u.name AS closed_by_name
+          FROM settlement_period sp
+          LEFT JOIN app_user u ON u.id = sp.closed_by
+         WHERE sp.yyyymm = #{yyyymm}
+    </select>
+
+    <select id="findSummaries" resultMap="summary">
+        SELECT s.partner_id, p.code AS partner_code, p.name AS partner_name,
+               s.ship_amount, s.return_amount, s.net_amount, s.rebate_amount
+          FROM settlement s
+          JOIN partner p ON p.id = s.partner_id
+         WHERE s.yyyymm = #{yyyymm}
+         ORDER BY p.code
+    </select>
+
+    <!-- 출고분은 주문 줄, 반품분은 반품 행을 거쳐 주문 줄을 찾는다 -->
+    <select id="findDetails" resultMap="detail">
+        SELECT d.source_type,
+               o.order_no,
+               i.line_no,
+               p.name AS product_name,
+               CASE WHEN d.source_type = 'SHIP' THEN i.qty ELSE -r.qty END AS qty,
+               d.amount,
+               d.rebate_rate,
+               d.rebate_amount,
+               CASE WHEN d.source_type = 'SHIP' THEN o.shipped_at ELSE r.returned_at END AS occurred_at
+          FROM settlement_detail d
+          LEFT JOIN sales_return r
+            ON d.source_type = 'RETURN' AND r.id = d.source_id
+          JOIN sales_order_item i
+            ON i.id = CASE WHEN d.source_type = 'SHIP' THEN d.source_id ELSE r.order_item_id END
+          JOIN sales_order o ON o.id = i.order_id
+          JOIN product p     ON p.id = i.product_id
+         WHERE d.yyyymm = #{yyyymm}
+           AND d.partner_id = #{partnerId}
+         ORDER BY occurred_at, o.order_no, i.line_no
+    </select>
+
+    <select id="findRuns" resultMap="run">
+        SELECT l.id, l.yyyymm, l.run_type, l.row_count, l.elapsed_ms, l.result,
+               u.name AS run_by_name, l.run_at
+          FROM settlement_run_log l
+          JOIN app_user u ON u.id = l.run_by
+         WHERE l.yyyymm = #{yyyymm}
+         ORDER BY l.run_at DESC, l.id DESC
+         LIMIT #{limit}
+    </select>
+
+    <!--
+        PgJDBC는 {call ...} 문법을 기본 설정에서 함수 호출(SELECT)로 바꾸기 때문에 프로시저가 실패한다.
+        CALL 문을 그대로 PreparedStatement로 실행한다.
+        같은 트랜잭션 안에서 뒤이어 조회하는 결과가 MyBatis 캐시에서 나오지 않도록 update로 선언한다.
+    -->
+    <update id="runSettlement">
+        CALL run_settlement(#{yyyymm}, #{userId}, #{close})
+    </update>
+</mapper>

@@ -3,6 +3,10 @@ import AppLayout from './components/AppLayout'
 import MarketLayout from './components/MarketLayout'
 import LoginPage from './pages/LoginPage'
 import AdminHome from './pages/admin/AdminHome'
+import AdminOrderDetailPage from './pages/admin/OrderDetailPage'
+import AdminOrdersPage from './pages/admin/OrdersPage'
+import SettlementDetailPage from './pages/admin/SettlementDetailPage'
+import SettlementsPage from './pages/admin/SettlementsPage'
 import PartnersPage from './pages/admin/PartnersPage'
 import ProductsPage from './pages/admin/ProductsPage'
 import RebatePoliciesPage from './pages/admin/RebatePoliciesPage'
@@ -14,6 +18,8 @@ import RequireAuth from './routes/RequireAuth'
 
 const adminMenus = [
   { to: '/admin', label: '운영 홈' },
+  { to: '/admin/orders', label: '주문 관리', matchChildren: true },
+  { to: '/admin/settlements', label: '월 정산', matchChildren: true },
   { to: '/admin/products', label: '상품' },
   { to: '/admin/partners', label: '거래처' },
   { to: '/admin/rebate-policies', label: '리베이트 정책' },
@@ -29,6 +35,10 @@ export const router = createBrowserRouter([
         element: <AppLayout menus={adminMenus} />,
         children: [
           { index: true, element: <AdminHome /> },
+          { path: 'orders', element: <AdminOrdersPage /> },
+          { path: 'orders/:id', element: <AdminOrderDetailPage /> },
+          { path: 'settlements', element: <SettlementsPage /> },
+          { path: 'settlements/:yyyymm/:partnerId', element: <SettlementDetailPage /> },
           { path: 'products', element: <ProductsPage /> },
           { path: 'partners', element: <PartnersPage /> },
           { path: 'rebate-policies', element: <RebatePoliciesPage /> },

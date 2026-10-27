@@ -11,6 +11,9 @@ const TONES: Record<string, string> = {
   CURRENT: 'done',
   SCHEDULED: 'info',
   ENDED: 'muted',
+  NONE: 'muted',
+  OPEN: 'info',
+  CLOSED: 'done',
 }
 
 interface Props {

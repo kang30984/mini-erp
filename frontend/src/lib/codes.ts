@@ -46,6 +46,12 @@ export const POLICY_STATES: Option[] = [
   { value: 'ENDED', label: '종료' },
 ]
 
+export const SETTLEMENT_STATUSES: Option[] = [
+  { value: 'NONE', label: '실행 전' },
+  { value: 'OPEN', label: '마감 전' },
+  { value: 'CLOSED', label: '마감' },
+]
+
 export function labelOf(options: Option[], value: string | null | undefined): string {
   if (!value) return '-'
   return options.find((o) => o.value === value)?.label ?? value

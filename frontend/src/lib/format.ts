@@ -36,3 +36,20 @@ export function today(): string {
   const offset = now.getTimezoneOffset() * 60_000
   return new Date(now.getTime() - offset).toISOString().substring(0, 10)
 }
+
+/** 202609 → 2026년 9월 */
+export function formatMonth(yyyymm: string): string {
+  return `${yyyymm.substring(0, 4)}년 ${Number(yyyymm.substring(4, 6))}월`
+}
+
+/** 이번 달 기준으로 months만큼 이동한 yyyymm */
+export function shiftMonth(base: string, months: number): string {
+  const year = Number(base.substring(0, 4))
+  const month = Number(base.substring(4, 6)) - 1 + months
+  const d = new Date(Date.UTC(year, month, 1))
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+export function currentMonth(): string {
+  return today().substring(0, 7).replace('-', '')
+}

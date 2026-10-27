@@ -4,7 +4,9 @@ import { useCancelOrder, useMyOrder } from '../../api/market'
 import DataTable, { type Column } from '../../components/DataTable'
 import Modal from '../../components/Modal'
 import StatusBadge from '../../components/StatusBadge'
-import { ORDER_EVENTS, ORDER_STATUSES, labelOf } from '../../lib/codes'
+import OrderHistoryList from '../../components/OrderHistoryList'
+import OrderReturnsTable from '../../components/OrderReturnsTable'
+import { ORDER_STATUSES, labelOf } from '../../lib/codes'
 import { formatDateTime, formatNumber, formatWon } from '../../lib/format'
 import type { OrderItem } from '../../types/order'
 
@@ -22,7 +24,14 @@ const itemColumns: Column<OrderItem>[] = [
     ),
   },
   { key: 'price', header: '단가', render: (i) => formatWon(i.unitPrice), align: 'right', width: '130px' },
-  { key: 'qty', header: '수량', render: (i) => formatNumber(i.qty), align: 'right', width: '72px' },
+  { key: 'qty', header: '수량', render: (i) => formatNumber(i.qty), align: 'right', width: '64px' },
+  {
+    key: 'returned',
+    header: '반품',
+    render: (i) => (i.returnedQty ? formatNumber(i.returnedQty) : '-'),
+    align: 'right',
+    width: '64px',
+  },
   { key: 'amount', header: '금액', render: (i) => formatWon(i.amount), align: 'right', width: '140px' },
 ]
 
@@ -96,18 +105,15 @@ export default function OrderDetailPage() {
         emptyMessage="주문 상품이 없습니다."
       />
 
+      {order.returns.length > 0 && (
+        <>
+          <h2 className="section-title">반품 내역</h2>
+          <OrderReturnsTable returns={order.returns} />
+        </>
+      )}
+
       <h2 className="section-title">처리 이력</h2>
-      <ol className="history">
-        {order.histories.map((h, index) => (
-          <li key={index}>
-            <span className="history-status">{labelOf(ORDER_EVENTS, h.toStatus)}</span>
-            <span className="history-meta">
-              {formatDateTime(h.changedAt)} {h.changedByName}
-              {h.reason && ` (${h.reason})`}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <OrderHistoryList histories={order.histories} />
 
       <Modal open={confirming} title="주문 취소" onClose={() => setConfirming(false)}>
         <p>{order.orderNo} 주문을 취소합니다. 취소한 주문은 되돌릴 수 없습니다.</p>

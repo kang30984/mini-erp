@@ -18,6 +18,18 @@ export interface OrderItem {
   qty: number
   unitPrice: number
   amount: number
+  returnedQty: number
+}
+
+export interface OrderReturn {
+  id: number
+  lineNo: number
+  productName: string
+  qty: number
+  amount: number
+  reason: string | null
+  createdByName: string
+  returnedAt: string
 }
 
 export interface OrderHistory {
@@ -39,9 +51,24 @@ export interface OrderDetail {
   orderedAt: string
   approvedAt: string | null
   shippedAt: string | null
+  version: number
   items: OrderItem[]
+  returns: OrderReturn[]
   histories: OrderHistory[]
 }
+
+export interface AdminOrderSummary {
+  id: number
+  orderNo: string
+  partnerName: string
+  status: OrderStatus
+  totalAmount: number
+  itemCount: number
+  firstProductName: string
+  orderedAt: string
+}
+
+export type OrderAction = 'approve' | 'reject' | 'ship' | 'cancel'
 
 export interface CreateOrder {
   items: { productId: number; qty: number }[]

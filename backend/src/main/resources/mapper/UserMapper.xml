@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.kang30984.minierp.auth.UserMapper">
+
+    <!-- AppUser는 record라서 생성자 인자 순서대로 매핑 -->
+    <resultMap id="appUser" type="io.github.kang30984.minierp.auth.AppUser">
+        <constructor>
+            <idArg column="id"            javaType="java.lang.Long"/>
+            <arg   column="login_id"      javaType="java.lang.String"/>
+            <arg   column="password_hash" javaType="java.lang.String"/>
+            <arg   column="name"          javaType="java.lang.String"/>
+            <arg   column="role"          javaType="java.lang.String"/>
+            <arg   column="partner_id"    javaType="java.lang.Long"/>
+            <arg   column="partner_name"  javaType="java.lang.String"/>
+            <arg   column="enabled"       javaType="_boolean"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findByLoginId" resultMap="appUser">
+        SELECT u.id,
+               u.login_id,
+               u.password_hash,
+               u.name,
+               u.role,
+               u.partner_id,
+               p.name AS partner_name,
+               (u.role = 'ADMIN' OR p.status = 'ACTIVE') AS enabled
+          FROM app_user u
+          LEFT JOIN partner p ON p.id = u.partner_id
+         WHERE u.login_id = #{loginId}
+    </select>
+</mapper>

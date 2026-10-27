@@ -215,7 +215,7 @@ erDiagram
 | `rebate_policy` | `valid_to`는 미포함(exclusive), NULL이면 현재 적용 중. 같은 등급의 기간 중복은 `EXCLUDE` 제약(btree_gist)으로 DB에서 차단 |
 | `sales_order` | `version`으로 낙관적 잠금. 두 관리자가 같은 주문을 동시에 승인하는 경우 방지 |
 | `sales_return` | `amount = qty × 원 주문 단가`. 등록 시 반품일 월이 CLOSED면 거부 |
-| `settlement_detail` | `source_type`은 `SHIP`(출고 라인) 또는 `RETURN`(반품). 반품은 금액·리베이트 모두 음수 |
+| `settlement_detail` | `source_type`은 `SHIP`(출고 라인) 또는 `RETURN`(반품). 반품은 금액·리베이트 모두 음수. 프로시저만 만드는 파생 데이터라 성능 때문에 외래키를 두지 않음 (V5) |
 | `settlement_run_log` | `run_type`은 `PREVIEW` 또는 `CLOSE`. 처리 건수와 소요 시간을 남겨 성능 비교에 사용 |
 
 ### 인덱스 (성능 측정 후 확정)
@@ -421,7 +421,7 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 | Backend | Java 21, Spring Boot 3, Spring Security, MyBatis |
 | Database | PostgreSQL, Flyway |
 | Test | JUnit 5, Testcontainers(PostgreSQL), k6 |
-| Infra | Docker Compose, GitHub Actions |
+| Infra | Docker Compose, GitHub Actions (CI) |
 
 ---
 
@@ -439,7 +439,7 @@ mini-erp/
 │     │  └─ common/        # 예외, 응답 포맷, 페이징
 │     ├─ main/resources/
 │     │  ├─ mapper/        # MyBatis XML
-│     │  └─ db/migration/  # V1__init.sql, V2__seed_demo.sql, V3__order_no_sequence.sql, V4__settlement_procedure.sql ...
+│     │  └─ db/migration/  # V1 스키마, V2 데모 데이터, V3 주문번호, V4 정산 프로시저, V5 상세 외래키 제거
 │     └─ test/             # Testcontainers 통합 테스트
 ├─ frontend/
 │  └─ src/
@@ -451,7 +451,8 @@ mini-erp/
 │     ├─ routes/           # 권한별 라우트 가드
 │     └─ types/
 ├─ db/
-│  └─ seed/                # 성능 측정용 대량 데이터 생성 스크립트
+│  ├─ seed/                # 지난달 데모 데이터, 성능 측정용 대량 데이터
+│  └─ perf/                # 정산 성능 측정 스크립트
 ├─ load-test/              # k6 시나리오
 ├─ docs/
 │  └─ DESIGN.md
@@ -471,15 +472,15 @@ mini-erp/
 - 마감월 반품 등록: 거부
 
 ### 성능 측정
-`db/seed`의 `generate_series` 스크립트로 거래처 200곳, 상품 500개, 한 달 출고 라인 10만 건을 만들고 측정합니다.
+`db/seed/perf_seed.sql`로 거래처 200곳, 상품 500개, 6개월 동안 매달 출고 라인 10만 건을 만들고, `db/perf/measure_settlement.sql`로 측정합니다. 측정 스크립트는 단계마다 트랜잭션 안에서 구조를 바꾸고 3번 실행한 뒤 ROLLBACK합니다.
 
-| 단계 | 변경 내용 | 처리 건수 | 소요 시간 | 비고 |
-|---|---|---|---|---|
-| 1 | 인덱스 없음 | | | `EXPLAIN ANALYZE` 첨부 |
-| 2 | 출고일·반품일 인덱스 추가 | | | |
-| 3 | 리베이트 정책 조인 개선 | | | |
+| 단계 | 구조 | 비고 |
+|---|---|---|
+| 1 | 정산용 인덱스 없음, 상세 외래키 있음 | V4 이전 |
+| 2 | 정산용 인덱스 추가 | V4 |
+| 3 | 상세 테이블 외래키 제거 | V5 (현재) |
 
-측정 결과는 실제 실행 후 채웁니다.
+측정 결과와 분석은 README의 "성능 측정"에 정리합니다. 개발 환경에서 측정했을 때 1, 2단계는 비슷했고 3단계에서 실행 시간이 절반 정도로 줄었습니다. `EXPLAIN ANALYZE`로 보면 상세 행 10만 건에 대한 외래키 확인 트리거가 시간의 절반 이상을 차지했습니다.
 
 ---
 

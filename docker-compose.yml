@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: minierp-postgres
+    environment:
+      POSTGRES_DB: minierp
+      POSTGRES_USER: minierp
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-minierp}
+    ports:
+      - "5432:5432"
+    volumes:
+      - minierp-pgdata:/var/lib/postgresql/data
+
+volumes:
+  minierp-pgdata:

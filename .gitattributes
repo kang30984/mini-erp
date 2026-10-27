@@ -1,0 +1,4 @@
+# gradlew는 리눅스/맥에서 실행되므로 LF, gradlew.bat은 윈도우용이라 CRLF로 고정
+/backend/gradlew        text eol=lf
+*.bat                   text eol=crlf
+*.jar                   binary

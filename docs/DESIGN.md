@@ -62,6 +62,15 @@ flowchart LR
 - 반품 리베이트는 **원래 출고일 시점의 요율**로 되돌립니다.
 - 금액은 원 단위 정수(`NUMERIC(15,0)`)이고, 리베이트는 주문 라인별로 원 미만을 버린 뒤 합산합니다.
 
+### 리베이트 요율 변경
+- 새 요율의 적용 시작일은 **내일 이후**만 허용합니다. 오늘이나 지난 날짜로 바꾸면 이미 출고된 주문에 적용될 요율이 달라지기 때문입니다.
+- 등록하면 기존 마지막 정책의 종료일을 새 시작일로 닫고, 새 정책을 종료일 없이 추가합니다.
+- 같은 등급의 변경 요청이 동시에 들어오면 마지막 정책 행을 `FOR UPDATE`로 잠가 순서대로 처리하고, 그래도 겹치면 `EXCLUDE` 제약이 막습니다.
+
+### 시간대
+- 업무 기준 시간대는 한국 시간(Asia/Seoul)입니다. 애플리케이션은 `Clock` 빈으로 날짜를 계산하고, DB 세션도 접속할 때 `SET TIME ZONE 'Asia/Seoul'`로 맞춥니다.
+- 서버를 UTC 환경에 배포해도 "오늘", "이번 달" 기준이 바뀌지 않게 하기 위해서입니다. 정산월 경계(출고일 기준)에 직접 영향을 줍니다.
+
 ### 마감
 - 정산월은 `OPEN`, `CLOSED` 두 상태입니다.
 - `OPEN` 상태에서는 미리보기(재계산)를 몇 번이든 실행할 수 있고, 실행할 때마다 해당 월 결과를 지우고 새로 만듭니다.
@@ -364,6 +373,7 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 |---|---|---|
 | GET, POST, PUT | `/api/admin/products` | 상품 관리 |
 | GET, POST, PUT | `/api/admin/partners` | 거래처 관리 |
+| GET | `/api/admin/grades` | 등급별 현재 요율과 변경 예정 요율 |
 | GET, POST | `/api/admin/rebate-policies` | 등급별 리베이트율 이력 조회·등록 |
 
 ### 정산 (ADMIN)
@@ -402,7 +412,7 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 
 | 구분 | 기술 |
 |---|---|
-| Frontend | React, TypeScript, Vite, React Router, TanStack Query, React Hook Form, AG Grid Community |
+| Frontend | React, TypeScript, Vite, React Router, TanStack Query, React Hook Form (표는 직접 만든 DataTable 컴포넌트) |
 | Backend | Java 21, Spring Boot 3, Spring Security, MyBatis |
 | Database | PostgreSQL, Flyway |
 | Test | JUnit 5, Testcontainers(PostgreSQL), k6 |
@@ -424,7 +434,7 @@ mini-erp/
 │     │  └─ common/        # 예외, 응답 포맷, 페이징
 │     ├─ main/resources/
 │     │  ├─ mapper/        # MyBatis XML
-│     │  └─ db/migration/  # V1__init.sql, V2__seed_demo.sql, V3__settlement_procedure.sql ...
+│     │  └─ db/migration/  # V1__init.sql, V2__seed_demo.sql, V3__order_no_sequence.sql, V4__settlement_procedure.sql ...
 │     └─ test/             # Testcontainers 통합 테스트
 ├─ frontend/
 │  └─ src/

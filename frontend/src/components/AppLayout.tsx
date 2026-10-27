@@ -1,9 +1,13 @@
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { useLogout, useMe } from '../api/auth'
 
-interface MenuItem {
+export interface MenuItem {
   to: string
   label: string
+  /** 메뉴 옆에 숫자로 보여 줄 값 (예: 장바구니 품목 수) */
+  count?: number
+  /** true면 하위 경로에서도 메뉴를 선택 상태로 표시 */
+  matchChildren?: boolean
 }
 
 interface Props {
@@ -27,8 +31,9 @@ export default function AppLayout({ menus }: Props) {
         <span className="shell-brand">mini-erp</span>
         <nav className="shell-nav" aria-label="주 메뉴">
           {menus.map((menu) => (
-            <NavLink key={menu.to} to={menu.to} end>
+            <NavLink key={menu.to} to={menu.to} end={!menu.matchChildren}>
               {menu.label}
+              {menu.count ? <span className="nav-count">{menu.count}</span> : null}
             </NavLink>
           ))}
         </nav>

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, hasCsrfCookie, request } from './client'
 import type { LoginForm, Me } from '../types/auth'
+import { clearAllCarts } from '../features/cart/CartContext'
 
 const ME_KEY = ['auth', 'me'] as const
 
@@ -51,6 +52,7 @@ export function useLogout() {
     onSettled: () => {
       // 다른 사용자 데이터가 캐시에 남지 않도록 전부 비운 뒤 로그인 상태만 null로 둔다
       queryClient.clear()
+      clearAllCarts()
       queryClient.setQueryData(ME_KEY, null)
     },
   })

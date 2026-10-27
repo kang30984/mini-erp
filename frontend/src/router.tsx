@@ -1,9 +1,23 @@
 import { Navigate, createBrowserRouter } from 'react-router'
 import AppLayout from './components/AppLayout'
+import MarketLayout from './components/MarketLayout'
 import LoginPage from './pages/LoginPage'
 import AdminHome from './pages/admin/AdminHome'
-import MarketHome from './pages/market/MarketHome'
+import PartnersPage from './pages/admin/PartnersPage'
+import ProductsPage from './pages/admin/ProductsPage'
+import RebatePoliciesPage from './pages/admin/RebatePoliciesPage'
+import CartPage from './pages/market/CartPage'
+import OrderDetailPage from './pages/market/OrderDetailPage'
+import OrdersPage from './pages/market/OrdersPage'
+import MarketProductsPage from './pages/market/ProductsPage'
 import RequireAuth from './routes/RequireAuth'
+
+const adminMenus = [
+  { to: '/admin', label: '운영 홈' },
+  { to: '/admin/products', label: '상품' },
+  { to: '/admin/partners', label: '거래처' },
+  { to: '/admin/rebate-policies', label: '리베이트 정책' },
+]
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -12,8 +26,13 @@ export const router = createBrowserRouter([
     element: <RequireAuth role="ADMIN" />,
     children: [
       {
-        element: <AppLayout menus={[{ to: '/admin', label: '운영 홈' }]} />,
-        children: [{ index: true, element: <AdminHome /> }],
+        element: <AppLayout menus={adminMenus} />,
+        children: [
+          { index: true, element: <AdminHome /> },
+          { path: 'products', element: <ProductsPage /> },
+          { path: 'partners', element: <PartnersPage /> },
+          { path: 'rebate-policies', element: <RebatePoliciesPage /> },
+        ],
       },
     ],
   },
@@ -22,8 +41,14 @@ export const router = createBrowserRouter([
     element: <RequireAuth role="PARTNER" />,
     children: [
       {
-        element: <AppLayout menus={[{ to: '/market', label: '주문 홈' }]} />,
-        children: [{ index: true, element: <MarketHome /> }],
+        element: <MarketLayout />,
+        children: [
+          { index: true, element: <Navigate to="products" replace /> },
+          { path: 'products', element: <MarketProductsPage /> },
+          { path: 'cart', element: <CartPage /> },
+          { path: 'orders', element: <OrdersPage /> },
+          { path: 'orders/:id', element: <OrderDetailPage /> },
+        ],
       },
     ],
   },

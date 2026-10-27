@@ -1,0 +1,342 @@
+:root {
+  --ink: #18212b;
+  --paper: #f2f4f6;
+  --surface: #ffffff;
+  --line: #d3d9e0;
+  --muted: #5b6673;
+  --primary: #1d4e73;
+  --primary-hover: #163e5c;
+  --focus: #2f7fb8;
+  --danger: #b42318;
+
+  font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Apple SD Gothic Neo',
+    'Malgun Gothic', sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--paper);
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+p,
+ol {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------- 공통 컨트롤 ---------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.button-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.button-primary:not(:disabled):hover {
+  background: var(--primary-hover);
+}
+
+.button-secondary {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.button-secondary:not(:disabled):hover {
+  border-color: var(--muted);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.field input {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  font: inherit;
+  color: inherit;
+}
+
+.field input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.field-error,
+.form-error {
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.form-error {
+  padding: 10px 12px;
+  border-left: 3px solid var(--danger);
+  background: #fdf1f0;
+}
+
+.page-status {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 48px 32px;
+  color: var(--muted);
+}
+
+/* ---------- 로그인 ---------- */
+
+.login {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+  min-height: 100vh;
+}
+
+.login-intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 20px;
+  padding: 64px clamp(32px, 7vw, 96px);
+  background: var(--ink);
+  color: #e8edf2;
+}
+
+.login-title {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.login-summary {
+  max-width: 30em;
+  color: #b7c2cd;
+}
+
+/* 업무 흐름: 단계 사이를 세로선으로 잇는다 */
+.login-flow {
+  list-style: none;
+  padding: 0;
+  margin-top: 16px;
+  counter-reset: flow;
+}
+
+.login-flow li {
+  position: relative;
+  padding: 0 0 22px 40px;
+  counter-increment: flow;
+}
+
+.login-flow li::before {
+  content: counter(flow);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #5d7489;
+  border-radius: 50%;
+  font-size: 13px;
+  color: #cfd8e0;
+}
+
+.login-flow li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 30px;
+  bottom: 4px;
+  width: 1px;
+  background: #3a4c5e;
+}
+
+.login-flow li:last-child {
+  padding-bottom: 0;
+  font-weight: 600;
+  color: #fff;
+}
+
+.login-flow li:last-child::before {
+  border-color: #8fb6d6;
+  background: #8fb6d6;
+  color: var(--ink);
+}
+
+.login-panel {
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+}
+
+.login-form {
+  display: grid;
+  gap: 18px;
+  width: 100%;
+  max-width: 340px;
+}
+
+.login-form-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.login-form .button {
+  margin-top: 6px;
+  min-height: 44px;
+}
+
+/* ---------- 앱 레이아웃 ---------- */
+
+.shell {
+  min-height: 100vh;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 56px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.shell-brand {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.shell-nav {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.shell-nav a {
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.shell-nav a:hover {
+  color: var(--ink);
+}
+
+.shell-nav a.active {
+  color: var(--primary);
+  font-weight: 600;
+  background: #e8eff5;
+}
+
+.shell-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.shell-partner {
+  margin-right: 8px;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.shell-user .button {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.shell-main {
+  max-width: 1200px;
+  padding: 32px 24px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.page-description {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+/* ---------- 좁은 화면 ---------- */
+
+@media (max-width: 760px) {
+  .login {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .login-intro {
+    padding: 40px 24px;
+  }
+
+  .login-title {
+    font-size: 34px;
+  }
+
+  .login-flow {
+    display: none;
+  }
+
+  .shell-header {
+    gap: 16px;
+    padding: 0 16px;
+  }
+
+  .shell-partner {
+    display: none;
+  }
+}

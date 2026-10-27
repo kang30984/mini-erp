@@ -1,20 +1,22 @@
 # mini-erp 설계 문서
 
-B2B IT 유통사를 가정한 **주문·출고·월 정산 미니 ERP**입니다.
-거래처가 마켓플레이스에서 주문하면 내부 담당자가 승인·출고하고, 월말에 거래처 등급별 리베이트를 계산해 정산을 마감하는 흐름을 구현합니다.
+> 개발 전에 작성한 설계 문서다. 구현하면서 달라진 부분은 해당 절에 **[구현]** 으로 표시했고, 결정 이유는 [ADR](adr/README.md)에 있다.
 
 ---
 
-## 1. 만드는 이유와 목표
+## 1. 목적
 
-| 목표 | 구현 포인트 |
+IT 제품 유통사의 거래처 주문부터 월 정산 마감까지를 작게 다시 만들어 본다. 지원하려는 공고(사내 ERP 고도화, 마켓플레이스 개발)에서 요구하는 것을 이 프로젝트로 직접 보여 주는 게 목적이다.
+
+| 요구 사항 | 이 프로젝트에서 보여 주는 방법 |
 |---|---|
-| React로 업무 화면 개발 | 주문·정산 그리드, 검색 조건, 입력 폼, 권한별 화면 분리 |
-| PL/SQL(PostgreSQL) 활용 | 월 정산 마감을 PL/pgSQL 프로시저로 구현 |
-| 기간계 업무 규칙 이해 | 마감월 수정 불가, 정책 변경 이력 반영, 반품 차감 처리 |
-| 성능과 정합성 검증 | 10만 건 기준 마감 시간 측정, 동시 승인 시 재고 정합성 테스트 |
+| 기간계 업무 이해 | 주문 상태 전이, 마감월 수정 불가, 요율 변경 이력, 마감 후 반품 처리 |
+| 프론트엔드·백엔드 개발 | React 화면(주문, 정산, 기준정보)과 Spring Boot API를 같이 만든다 |
+| PL/SQL | 월 정산을 PL/pgSQL 프로시저로 만든다 |
+| React | 권한별 화면, 목록·검색·페이징, 입력 폼, 장바구니 |
+| 정합성과 성능 | 동시 승인 테스트, 10만 건 정산 시간 측정 |
 
-범위 밖: 회계 전표, 세금계산서, 결제 연동, 배송 추적
+범위에서 뺀 것: 회계 전표, 세금계산서, 결제 연동, 배송 추적
 
 ---
 
@@ -31,54 +33,67 @@ flowchart LR
     D -->|부분/전체 반품| E["반품 등록"]
     D --> F["월 정산 마감"]
     E --> F
-    F --> G["거래처별 정산 내역<br/>엑셀 다운로드"]
+    F --> G["거래처별 정산 내역<br/>CSV 내려받기"]
 ```
 
 ### 주문 상태 전이
 
-| 현재 상태 | 가능한 다음 상태 | 처리 주체 | 부가 처리 |
+| 현재 상태 | 다음 상태 | 처리하는 사람 | 같이 하는 일 |
 |---|---|---|---|
-| REQUESTED | APPROVED | 관리자 | 재고 차감 (부족하면 승인 실패) |
+| REQUESTED | APPROVED | 관리자 | 재고 차감. 부족하면 승인 실패 |
 | REQUESTED | REJECTED | 관리자 | 반려 사유 필수 |
 | REQUESTED | CANCELED | 거래처 | - |
 | APPROVED | CANCELED | 관리자 | 재고 복원 |
-| APPROVED | SHIPPED | 관리자 | 출고일시 기록 (정산 기준일) |
+| APPROVED | SHIPPED | 관리자 | 출고일시 기록. 정산 기준일이 된다 |
 
-상태가 바뀔 때마다 `order_status_history`에 변경 전·후 상태, 처리자, 사유를 남깁니다.
+상태가 바뀔 때마다 `order_status_history`에 바뀌기 전·후 상태, 처리한 사람, 사유를 남긴다.
 
 ---
 
 ## 3. 업무 규칙
 
 ### 정산 기준
-- **출고분**은 출고일(`shipped_at`)이 속한 월에 정산합니다.
-- **반품분**은 반품일(`returned_at`)이 속한 월에 차감합니다. 원래 출고월이 이미 마감됐어도 반품월에 마이너스로 들어가므로 마감월을 다시 열 필요가 없습니다.
-- 반품 수량 합계는 출고 수량을 넘을 수 없습니다.
+
+- 출고분은 출고일(`shipped_at`)이 속한 달에 정산한다.
+- 반품분은 반품일(`returned_at`)이 속한 달에 차감한다. 원래 출고한 달이 이미 마감됐어도 반품한 달에 마이너스로 들어가므로 마감한 달을 다시 열 필요가 없다.
+- 반품 수량 합계는 주문 수량을 넘을 수 없다.
 
 ### 리베이트
-- 거래처 등급(SILVER, GOLD, PLATINUM)마다 리베이트율이 다릅니다.
-- 리베이트율은 `rebate_policy`에 적용 기간과 함께 이력으로 관리합니다. 월 중간에 요율이 바뀌어도 **출고일 시점의 요율**을 적용합니다.
-- 주문 시점의 거래처 등급을 `sales_order.partner_grade_code`에 저장해 둡니다. 나중에 등급이 바뀌어도 과거 주문의 정산 결과가 달라지지 않게 하기 위해서입니다.
-- 반품 리베이트는 **원래 출고일 시점의 요율**로 되돌립니다.
-- 금액은 원 단위 정수(`NUMERIC(15,0)`)이고, 리베이트는 주문 라인별로 원 미만을 버린 뒤 합산합니다.
 
-### 리베이트 요율 변경
-- 새 요율의 적용 시작일은 **내일 이후**만 허용합니다. 오늘이나 지난 날짜로 바꾸면 이미 출고된 주문에 적용될 요율이 달라지기 때문입니다.
-- 등록하면 기존 마지막 정책의 종료일을 새 시작일로 닫고, 새 정책을 종료일 없이 추가합니다.
-- 같은 등급의 변경 요청이 동시에 들어오면 마지막 정책 행을 `FOR UPDATE`로 잠가 순서대로 처리하고, 그래도 겹치면 `EXCLUDE` 제약이 막습니다.
+- 거래처 등급(SILVER, GOLD, PLATINUM)마다 리베이트율이 다르다.
+- 요율은 `rebate_policy`에 적용 기간과 함께 이력으로 쌓는다. 월 중간에 요율이 바뀌어도 출고일에 적용 중이던 요율을 쓴다.
+- 주문할 때의 거래처 등급을 `sales_order.partner_grade_code`에 저장해 둔다. 나중에 등급이 바뀌어도 지난 주문의 정산 결과가 달라지지 않게 하기 위해서다.
+- 반품 리베이트는 원래 출고일의 요율로 되돌린다.
+- 금액은 원 단위 정수(`NUMERIC(15,0)`)이고, 리베이트는 주문 줄마다 원 미만을 버린 뒤 합친다.
 
-### 시간대
-- 업무 기준 시간대는 한국 시간(Asia/Seoul)입니다. 애플리케이션은 `Clock` 빈으로 날짜를 계산하고, DB 세션도 접속할 때 `SET TIME ZONE 'Asia/Seoul'`로 맞춥니다.
-- 서버를 UTC 환경에 배포해도 "오늘", "이번 달" 기준이 바뀌지 않게 하기 위해서입니다. 정산월 경계(출고일 기준)에 직접 영향을 줍니다.
+결정 이유는 [ADR-002](adr/002-rebate-rate-and-returns.md)에 있다.
+
+### 요율 변경
+
+**[구현]** 처음 설계에는 없던 규칙이다. 구현하면서 정했다.
+
+- 새 요율의 적용 시작일은 내일 이후만 받는다. 오늘이나 지난 날짜로 바꾸면 이미 출고된 주문에 적용될 요율이 달라진다.
+- 등록하면 기존 마지막 정책의 종료일을 새 시작일로 닫고, 새 정책을 종료일 없이 추가한다.
+- 같은 등급을 동시에 바꾸는 요청은 마지막 정책 행을 `FOR UPDATE`로 잠가 차례로 처리한다. 그래도 기간이 겹치면 `EXCLUDE` 제약이 막는다.
 
 ### 마감
-- 정산월은 `OPEN`, `CLOSED` 두 상태입니다.
-- `OPEN` 상태에서는 미리보기(재계산)를 몇 번이든 실행할 수 있고, 실행할 때마다 해당 월 결과를 지우고 새로 만듭니다.
-- 미리보기는 이번 달까지, 마감은 **지난달까지만** 할 수 있습니다. 진행 중인 달을 마감하면 남은 기간의 출고·반품을 받을 수 없기 때문입니다. 마감 전에는 미리보기를 한 번 이상 실행해야 합니다.
-- 마감할 때도 프로시저가 최신 데이터로 다시 계산한 뒤 닫습니다. 미리보기 이후에 들어온 반품이 빠지지 않습니다.
-- 출고일에 적용할 리베이트 정책이 없는 주문이 있으면 정산을 중단합니다. 조인에서 조용히 빠지면 금액이 틀린 채로 마감되기 때문입니다.
-- `CLOSED`가 되면 재실행할 수 없고, 그 월에 해당하는 출고·반품 데이터도 등록하거나 수정할 수 없습니다.
-- 같은 월을 두 명이 동시에 마감하지 못하도록 정산월 행에 잠금을 겁니다.
+
+- 정산월은 `OPEN`, `CLOSED` 두 상태다.
+- `OPEN`인 달은 미리보기(다시 계산)를 몇 번이든 할 수 있고, 할 때마다 그 달의 결과를 지우고 새로 만든다.
+- `CLOSED`가 되면 다시 계산할 수 없고, 그 달에 속한 출고·반품 데이터도 추가하거나 고칠 수 없다.
+- 같은 달을 두 사람이 동시에 마감하지 못하도록 정산월 행을 잠근다.
+
+**[구현]** 아래 규칙을 더했다 ([ADR-003](adr/003-closing-rules.md)).
+
+- 미리보기는 이번 달까지, 마감은 지난달까지만 할 수 있다. 진행 중인 달을 마감하면 남은 기간의 출고·반품을 받을 수 없다.
+- 마감하려면 미리보기를 한 번 이상 실행해야 한다.
+- 마감할 때도 최신 데이터로 다시 계산한 뒤 닫는다. 미리보기 뒤에 들어온 반품이 빠지지 않는다.
+- 출고일에 적용할 리베이트 정책이 없는 주문이 있으면 정산을 멈춘다. 조인에서 조용히 빠지면 틀린 금액으로 마감되기 때문이다.
+- 마감한 달의 데이터는 서비스에서 먼저 막고, `sales_return`·`sales_order` 트리거로 한 번 더 막는다.
+
+### 시간대
+
+**[구현]** 업무 기준 시간대는 한국 시간(Asia/Seoul)이다. 애플리케이션은 `Clock` 빈으로 날짜를 계산하고, DB 세션도 접속할 때 `SET TIME ZONE 'Asia/Seoul'`로 맞춘다. 서버를 UTC 환경에 올려도 "오늘"과 "이번 달"이 바뀌지 않게 하기 위해서다. 정산월 경계(출고일 기준)에 바로 영향을 준다.
 
 ---
 
@@ -212,121 +227,44 @@ erDiagram
 
 | 테이블 | 메모 |
 |---|---|
-| `rebate_policy` | `valid_to`는 미포함(exclusive), NULL이면 현재 적용 중. 같은 등급의 기간 중복은 `EXCLUDE` 제약(btree_gist)으로 DB에서 차단 |
-| `sales_order` | `version`으로 낙관적 잠금. 두 관리자가 같은 주문을 동시에 승인하는 경우 방지 |
-| `sales_return` | `amount = qty × 원 주문 단가`. 등록 시 반품일 월이 CLOSED면 거부 |
-| `settlement_detail` | `source_type`은 `SHIP`(출고 라인) 또는 `RETURN`(반품). 반품은 금액·리베이트 모두 음수. 프로시저만 만드는 파생 데이터라 성능 때문에 외래키를 두지 않음 (V5) |
-| `settlement_run_log` | `run_type`은 `PREVIEW` 또는 `CLOSE`. 처리 건수와 소요 시간을 남겨 성능 비교에 사용 |
+| `rebate_policy` | `valid_to`는 포함하지 않는 날짜이고, NULL이면 지금 적용 중이다. 같은 등급의 기간이 겹치는 것은 `EXCLUDE` 제약(btree_gist)으로 DB에서 막는다 |
+| `sales_order` | `version`으로 낙관적 잠금. 두 관리자가 같은 주문을 동시에 처리하는 경우를 막는다 |
+| `sales_return` | `amount = 수량 × 원래 주문 단가`. 반품일이 속한 달이 마감됐으면 등록할 수 없다 |
+| `settlement_detail` | `source_type`은 `SHIP`(출고 줄) 또는 `RETURN`(반품). 반품은 금액·리베이트 모두 음수다. **[구현]** 프로시저만 만드는 파생 데이터라 성능 때문에 외래키를 뺐다 ([ADR-004](adr/004-settlement-detail-without-fk.md)) |
+| `settlement_run_log` | `run_type`은 `PREVIEW` 또는 `CLOSE`. 처리 건수와 소요 시간을 남겨서 성능 비교에 쓴다. **[구현]** 성공한 실행만 남긴다 ([ADR-005](adr/005-no-requires-new-failure-log.md)) |
 
-### 인덱스 (성능 측정 후 확정)
+### 인덱스
+
+처음에는 아래 인덱스를 측정한 뒤 확정하기로 했다.
+
 - `sales_order (shipped_at) WHERE status = 'SHIPPED'`
 - `sales_return (returned_at)`
 - `rebate_policy (grade_code, valid_from)`
 - `settlement_detail (yyyymm, partner_id)`
 
+**[구현]** 네 개 모두 넣었다. 측정해 보니 6개월치 데이터에서는 앞의 세 인덱스로 정산이 빨라지지 않았다. 이력이 쌓일수록 효과가 커질 것으로 보고 지우지는 않았다 (README "성능" 참고).
+
 ---
 
-## 5. 정산 마감 프로시저
+## 5. 정산 프로시저
 
-집계는 행 단위 반복 대신 `INSERT ... SELECT` 한 번에 처리합니다.
+`run_settlement(p_yyyymm, p_user_id, p_close)` 하나로 미리보기와 마감을 같이 처리한다.
 
-```sql
-CREATE OR REPLACE PROCEDURE run_settlement(
-    p_yyyymm  CHAR(6),
-    p_user_id BIGINT,
-    p_close   BOOLEAN
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_from    DATE := to_date(p_yyyymm || '01', 'YYYYMMDD');
-    v_to      DATE := (to_date(p_yyyymm || '01', 'YYYYMMDD') + INTERVAL '1 month')::date;
-    v_status  VARCHAR(10);
-    v_rows    INT;
-    v_started TIMESTAMP := clock_timestamp();
-BEGIN
-    -- 정산월이 없으면 만들고, 있으면 잠금
-    INSERT INTO settlement_period (yyyymm, status)
-    VALUES (p_yyyymm, 'OPEN')
-    ON CONFLICT (yyyymm) DO NOTHING;
+1. 정산월 행을 만들거나(`ON CONFLICT DO NOTHING`) 잠근다(`FOR UPDATE`).
+2. 이미 마감된 달이면 중단한다.
+3. 그 달의 기존 상세·합계를 지운다.
+4. 출고분과 반품분을 `INSERT ... SELECT` 한 번으로 상세에 넣는다. 리베이트율은 출고일 기준으로 조인해서 찾는다.
+5. 상세를 거래처별로 합쳐 합계에 넣는다.
+6. `p_close`가 참이면 정산월을 `CLOSED`로 바꾼다.
+7. 실행 이력에 처리 건수와 소요 시간을 남긴다.
 
-    SELECT status INTO v_status
-      FROM settlement_period
-     WHERE yyyymm = p_yyyymm
-       FOR UPDATE;
+**[구현]** 3번 앞에 "적용할 리베이트 정책이 없는 주문 검사"를 넣었다. 실제 코드는 `V4__settlement_procedure.sql`에 있다.
 
-    IF v_status = 'CLOSED' THEN
-        RAISE EXCEPTION '이미 마감된 정산월입니다: %', p_yyyymm;
-    END IF;
+### 호출할 때 주의할 것
 
-    -- 기존 미리보기 결과 삭제
-    DELETE FROM settlement_detail WHERE yyyymm = p_yyyymm;
-    DELETE FROM settlement        WHERE yyyymm = p_yyyymm;
-
-    -- 출고분 + 반품분 상세
-    INSERT INTO settlement_detail
-           (yyyymm, partner_id, source_type, source_id, amount, rebate_rate, rebate_amount)
-    SELECT p_yyyymm, o.partner_id, 'SHIP', i.id,
-           i.amount, rp.rebate_rate, floor(i.amount * rp.rebate_rate)
-      FROM sales_order o
-      JOIN sales_order_item i ON i.order_id = o.id
-      JOIN rebate_policy rp
-        ON rp.grade_code = o.partner_grade_code
-       AND o.shipped_at >= rp.valid_from
-       AND (rp.valid_to IS NULL OR o.shipped_at < rp.valid_to)
-     WHERE o.status = 'SHIPPED'
-       AND o.shipped_at >= v_from
-       AND o.shipped_at <  v_to
-    UNION ALL
-    SELECT p_yyyymm, o.partner_id, 'RETURN', r.id,
-           -r.amount, rp.rebate_rate, -floor(r.amount * rp.rebate_rate)
-      FROM sales_return r
-      JOIN sales_order_item i ON i.id = r.order_item_id
-      JOIN sales_order o      ON o.id = i.order_id
-      JOIN rebate_policy rp
-        ON rp.grade_code = o.partner_grade_code
-       AND o.shipped_at >= rp.valid_from
-       AND (rp.valid_to IS NULL OR o.shipped_at < rp.valid_to)
-     WHERE r.returned_at >= v_from
-       AND r.returned_at <  v_to;
-
-    GET DIAGNOSTICS v_rows = ROW_COUNT;
-
-    -- 거래처별 합계
-    INSERT INTO settlement
-           (yyyymm, partner_id, ship_amount, return_amount, net_amount, rebate_amount, created_at)
-    SELECT yyyymm, partner_id,
-           COALESCE(SUM(amount) FILTER (WHERE source_type = 'SHIP'), 0),
-           COALESCE(-SUM(amount) FILTER (WHERE source_type = 'RETURN'), 0),
-           SUM(amount),
-           SUM(rebate_amount),
-           now()
-      FROM settlement_detail
-     WHERE yyyymm = p_yyyymm
-     GROUP BY yyyymm, partner_id;
-
-    IF p_close THEN
-        UPDATE settlement_period
-           SET status = 'CLOSED', closed_at = now(), closed_by = p_user_id
-         WHERE yyyymm = p_yyyymm;
-    END IF;
-
-    INSERT INTO settlement_run_log
-           (yyyymm, run_type, row_count, elapsed_ms, result, run_by, run_at)
-    VALUES (p_yyyymm,
-            CASE WHEN p_close THEN 'CLOSE' ELSE 'PREVIEW' END,
-            v_rows,
-            (EXTRACT(EPOCH FROM clock_timestamp() - v_started) * 1000)::int,
-            'SUCCESS', p_user_id, now());
-END;
-$$;
-```
-
-### 호출 시 주의
-- 프로시저 안에서 `COMMIT`하지 않습니다. 트랜잭션은 Spring `@Transactional`이 관리합니다.
-- MyBatis에서는 JDBC escape 문법(`{call ...}`) 대신 `CALL run_settlement(#{yyyymm}, #{userId}, #{close})`를 그대로 실행합니다. PgJDBC는 기본 설정에서 `{call}`을 함수 호출로 바꾸기 때문에 프로시저 호출이 실패할 수 있습니다.
-- 실패는 `settlement_run_log`에 남기지 않고 애플리케이션 로그(WARN)로 남깁니다. 처음에는 별도 트랜잭션(`REQUIRES_NEW`)으로 실패 행을 넣으려 했는데, 실패 로그도 정산월 행을 참조해야 해서 바깥 트랜잭션이 잡고 있는(아직 커밋 전인) 정산월 행을 기다리게 됩니다. 바깥 트랜잭션은 안쪽이 끝나기를 기다리므로 서로 기다리는 상태가 되고, 둘 다 같은 애플리케이션 스레드라 DB가 교착으로 감지하지도 못합니다.
-- 서비스에서 먼저 마감 여부를 확인해서, 흔한 실패(이미 마감된 월)는 프로시저를 호출하기 전에 친절한 메시지로 돌려줍니다. 프로시저 안의 검사는 동시에 마감하는 경우를 위한 안전장치입니다.
+- 프로시저 안에서 `COMMIT`하지 않는다. 트랜잭션은 Spring `@Transactional`이 관리한다.
+- MyBatis에서는 JDBC escape 문법(`{call ...}`) 대신 `CALL run_settlement(...)`를 그대로 실행한다. PgJDBC는 기본 설정에서 `{call}`을 함수 호출로 바꾸기 때문에 프로시저 호출이 실패할 수 있다.
+- 실패 기록은 처음에 별도 트랜잭션(`REQUIRES_NEW`)으로 남기려고 했다. **[구현]** 바깥 트랜잭션이 잡은 정산월 행 때문에 서로 기다리다 멈추는 경우가 있어서 애플리케이션 로그로 바꿨다 ([ADR-005](adr/005-no-requires-new-failure-log.md)).
 
 ---
 
@@ -334,62 +272,72 @@ $$;
 
 | 상황 | 처리 방법 |
 |---|---|
-| 같은 상품 주문을 동시에 승인 | `UPDATE product SET stock_qty = stock_qty - :qty WHERE id = :id AND stock_qty >= :qty` 실행 후 영향 행이 0이면 재고 부족으로 승인 실패 |
-| 같은 주문을 두 관리자가 동시에 처리 | `sales_order.version` 낙관적 잠금. 충돌 시 "다른 사용자가 먼저 처리했습니다" 응답 |
-| 같은 월을 동시에 마감 | 프로시저에서 `settlement_period` 행을 `FOR UPDATE`로 잠금 |
-| 마감월 데이터 변경 | 서비스에서 1차 검증, `sales_return`·`sales_order` 트리거로 2차 차단 |
-| 같은 주문 줄을 동시에 반품 | 주문 줄을 `FOR UPDATE`로 잠근 뒤, **별도 문장**으로 반품 합계를 조회 (READ COMMITTED에서는 문장마다 새 스냅샷을 쓰므로 잠금 대기 중 커밋된 반품까지 보임) |
+| 같은 상품 주문을 동시에 승인 | `stock_qty >= 수량` 조건을 건 UPDATE로 재고를 줄이고, 영향받은 행이 0이면 재고 부족으로 승인 실패 |
+| 같은 주문을 두 관리자가 동시에 처리 | 상태와 `version`을 조건으로 건 UPDATE. 충돌하면 "다른 사용자가 먼저 처리했다"로 응답 |
+| 같은 달을 동시에 마감 | 프로시저에서 정산월 행을 `FOR UPDATE`로 잠근다 |
+| 마감한 달의 데이터 변경 | 서비스에서 먼저 확인하고, 트리거로 한 번 더 막는다 |
+| 같은 주문 줄을 동시에 반품 | **[구현]** 주문 줄을 `FOR UPDATE`로 잠근 뒤 반품 합계를 다음 문장에서 따로 구한다 ([ADR-007](adr/007-return-qty-check.md)) |
 
-k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고, 승인 건수와 남은 재고가 맞는지 확인합니다.
+**[구현]** 승인과 승인 취소는 둘 다 "주문 행 → 상품 행(ID 오름차순)" 순서로 잠근다 ([ADR-006](adr/006-approval-locking.md)).
+
+처음에는 k6로 "재고 100개에 승인 200건"만 확인하려고 했다. **[구현]** 같은 상황을 JUnit 동시성 테스트(`ConcurrencyIntegrationTest`)로도 만들어서 CI에서 매번 확인한다. 동시 승인 외에 같은 주문 중복 승인, 승인과 취소 경합, 동시 반품도 넣었다.
 
 ---
 
 ## 7. API
 
 ### 인증
-| Method | URL | 설명 |
+
+| 메서드 | 경로 | 설명 |
 |---|---|---|
+| GET | `/api/auth/csrf` | CSRF 쿠키 받기 |
 | POST | `/api/auth/login` | 로그인 (세션) |
 | POST | `/api/auth/logout` | 로그아웃 |
-| GET | `/api/auth/me` | 내 정보, 권한 |
+| GET | `/api/auth/me` | 내 정보와 권한 |
 
-### 마켓플레이스 (PARTNER)
-| Method | URL | 설명 |
+### 마켓플레이스 (거래처)
+
+| 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/market/products` | 상품 목록 (카테고리, 검색어, 페이지) |
+| GET | `/api/market/products` | 판매 중인 상품 목록 (분류, 검색어, 페이지) |
 | POST | `/api/market/orders` | 주문 등록 |
-| GET | `/api/market/orders` | 내 주문 목록 |
+| GET | `/api/market/orders` | 내 주문 목록 (상태로 거르기) |
 | GET | `/api/market/orders/{id}` | 내 주문 상세 |
-| POST | `/api/market/orders/{id}/cancel` | 주문 취소 (REQUESTED만) |
+| POST | `/api/market/orders/{id}/cancel` | 주문 취소 (승인 대기 상태만) |
 
-### 주문 관리 (ADMIN)
-| Method | URL | 설명 |
+### 주문 관리 (관리자)
+
+| 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/admin/orders` | 주문 검색 (상태, 기간, 거래처, 페이지) |
-| GET | `/api/admin/orders/{id}` | 주문 상세 + 상태 이력 |
+| GET | `/api/admin/orders` | 주문 검색 (상태, 기간, 주문번호·거래처명, 페이지) |
+| GET | `/api/admin/orders/status-counts` | 상태별 주문 건수 |
+| GET | `/api/admin/orders/{id}` | 주문 상세 (상품, 반품, 처리 이력) |
 | POST | `/api/admin/orders/{id}/approve` | 승인 |
 | POST | `/api/admin/orders/{id}/reject` | 반려 (사유 필수) |
 | POST | `/api/admin/orders/{id}/ship` | 출고 |
-| POST | `/api/admin/orders/{id}/cancel` | 승인 건 취소 |
+| POST | `/api/admin/orders/{id}/cancel` | 승인 취소 |
 | POST | `/api/admin/orders/{id}/returns` | 반품 등록 |
 
-### 기준정보 (ADMIN)
-| Method | URL | 설명 |
+### 기준정보 (관리자)
+
+| 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET, POST, PUT | `/api/admin/products` | 상품 관리 |
 | GET, POST, PUT | `/api/admin/partners` | 거래처 관리 |
 | GET | `/api/admin/grades` | 등급별 현재 요율과 변경 예정 요율 |
-| GET, POST | `/api/admin/rebate-policies` | 등급별 리베이트율 이력 조회·등록 |
+| GET, POST | `/api/admin/rebate-policies` | 요율 이력 조회, 요율 변경 등록 |
 
-### 정산 (ADMIN)
-| Method | URL | 설명 |
+### 정산 (관리자)
+
+| 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/admin/settlements/{yyyymm}` | 거래처별 정산 합계 |
-| POST | `/api/admin/settlements/{yyyymm}/preview` | 미리보기 실행 |
-| POST | `/api/admin/settlements/{yyyymm}/close` | 마감 실행 |
+| GET | `/api/admin/settlements/{yyyymm}` | 정산월 상태, 거래처별 합계, 실행 이력 |
+| POST | `/api/admin/settlements/{yyyymm}/preview` | 미리보기 |
+| POST | `/api/admin/settlements/{yyyymm}/close` | 마감 |
 | GET | `/api/admin/settlements/{yyyymm}/partners/{partnerId}` | 거래처 정산 상세 |
-| GET | `/api/admin/settlements/{yyyymm}/csv` | CSV 다운로드 (UTF-8 BOM, 엑셀에서 바로 열림) |
-| GET | `/api/admin/orders/status-counts` | 상태별 주문 건수 |
+| GET | `/api/admin/settlements/{yyyymm}/csv` | CSV 내려받기 |
+
+**[구현]** 처음에는 엑셀 파일로 내려받으려고 했는데, 엑셀 라이브러리를 추가하지 않고 UTF-8 BOM을 붙인 CSV로 했다. 엑셀에서 바로 열린다. 실행 이력은 별도 API 대신 정산월 조회 응답에 같이 넣었다.
 
 ---
 
@@ -397,31 +345,33 @@ k6로 같은 상품 재고 100개에 승인 요청 200건을 동시에 보내고
 
 | 구분 | 경로 | 화면 | 주요 요소 |
 |---|---|---|---|
-| 공통 | `/login` | 로그인 | 권한에 따라 마켓 또는 관리자 메인으로 이동 |
-| 마켓 | `/market/products` | 상품 목록 | 카테고리 필터, 검색, 장바구니 담기 |
-| 마켓 | `/market/cart` | 장바구니 | 수량 변경, 합계, 주문하기 |
-| 마켓 | `/market/orders` | 내 주문 | 상태별 탭, 상세, 취소 |
-| 관리 | `/admin/orders` | 주문 관리 | 검색 조건 + 그리드, 다건 선택 승인 |
-| 관리 | `/admin/orders/:id` | 주문 상세 | 라인 목록, 상태 이력, 승인·반려·출고·반품 버튼 |
-| 관리 | `/admin/products` | 상품 관리 | 그리드 + 등록·수정 모달 |
-| 관리 | `/admin/partners` | 거래처 관리 | 등급 변경 |
-| 관리 | `/admin/rebate-policies` | 리베이트 정책 | 등급별 적용 기간 타임라인 |
-| 관리 | `/admin/settlements` | 월 정산 | 월 선택, 미리보기·마감 버튼, 거래처별 합계 표, CSV |
-| 관리 | `/admin/settlements/:yyyymm/:partnerId` | 정산 상세 | 출고·반품 라인별 금액과 적용 요율 |
+| 공통 | `/login` | 로그인 | 권한에 따라 주문 화면이나 운영 화면으로 이동 |
+| 거래처 | `/market/products` | 상품 주문 | 분류, 검색, 수량 입력, 장바구니 담기 |
+| 거래처 | `/market/cart` | 장바구니 | 수량 변경, 예상 금액, 주문하기 |
+| 거래처 | `/market/orders` | 주문 내역 | 상태별 탭, 상세, 취소 |
+| 관리 | `/admin/orders` | 주문 관리 | 상태별 탭(건수), 검색 조건, 목록 |
+| 관리 | `/admin/orders/:id` | 주문 상세 | 상품, 반품 내역, 처리 이력, 승인·반려·출고·취소·반품 |
+| 관리 | `/admin/products` | 상품 | 목록과 등록·수정 창 |
+| 관리 | `/admin/partners` | 거래처 | 등급, 거래 상태 변경 |
+| 관리 | `/admin/rebate-policies` | 리베이트 정책 | 등급별 현재 요율, 요율 변경 등록, 변경 이력 |
+| 관리 | `/admin/settlements` | 월 정산 | 월 선택, 미리보기·마감, 거래처별 합계, CSV |
+| 관리 | `/admin/settlements/:yyyymm/:partnerId` | 정산 상세 | 출고·반품 줄별 금액과 적용 요율 |
+
+**[구현]** 처음에는 목록 화면에 AG Grid를 쓰려고 했다. 필요한 건 정렬된 표와 페이징 정도라서 직접 만든 `DataTable` 컴포넌트로 했다. 검색 조건과 페이지 번호는 URL 쿼리에 넣어서, 새로 고치거나 뒤로 가도 보던 조건이 그대로 남는다.
 
 ---
 
 ## 9. 기술 스택
 
-버전은 프로젝트 생성 시점의 최신 안정 버전을 사용합니다.
-
-| 구분 | 기술 |
+| 영역 | 사용 기술 |
 |---|---|
-| Frontend | React, TypeScript, Vite, React Router, TanStack Query, React Hook Form (표는 직접 만든 DataTable 컴포넌트) |
-| Backend | Java 21, Spring Boot 3, Spring Security, MyBatis |
-| Database | PostgreSQL, Flyway |
-| Test | JUnit 5, Testcontainers(PostgreSQL), k6 |
-| Infra | Docker Compose, GitHub Actions (CI) |
+| 프론트엔드 | React, TypeScript, Vite, React Router, TanStack Query, React Hook Form |
+| 백엔드 | Java 21, Spring Boot 3.5, Spring Security, MyBatis |
+| 데이터 | PostgreSQL 16, Flyway |
+| 테스트 | JUnit 5, Testcontainers(PostgreSQL), k6 |
+| 기타 | Docker Compose, GitHub Actions |
+
+**[구현]** 입력 검증에 Zod를 같이 쓰려고 했는데, 설치할 때 의존성 충돌이 나서 React Hook Form 기본 검증만 썼다 ([트러블슈팅 3번](troubleshooting.md#3-react-hook-form-검증-라이브러리-설치-실패)).
 
 ---
 
@@ -433,18 +383,20 @@ mini-erp/
 │  └─ src/
 │     ├─ main/java/.../minierp/
 │     │  ├─ auth/          # 로그인, 권한
+│     │  ├─ common/        # 예외, 페이징, 시간대
 │     │  ├─ master/        # 상품, 거래처, 리베이트 정책
-│     │  ├─ order/         # 주문, 상태 전이, 반품
-│     │  ├─ settlement/    # 정산 실행, 조회, 엑셀
-│     │  └─ common/        # 예외, 응답 포맷, 페이징
+│     │  ├─ market/        # 거래처용 상품 목록
+│     │  ├─ order/         # 주문, 상태 전이, 반품 (관리자용은 order/admin)
+│     │  └─ settlement/    # 정산 실행, 조회, CSV
 │     ├─ main/resources/
 │     │  ├─ mapper/        # MyBatis XML
 │     │  └─ db/migration/  # V1 스키마, V2 데모 데이터, V3 주문번호, V4 정산 프로시저, V5 상세 외래키 제거
 │     └─ test/             # Testcontainers 통합 테스트
 ├─ frontend/
 │  └─ src/
-│     ├─ api/              # API 클라이언트, TanStack Query 훅
-│     ├─ components/       # 공통 그리드, 검색 영역, 모달
+│     ├─ api/              # API 호출과 TanStack Query 훅
+│     ├─ components/       # 표, 페이지 이동, 모달, 상태 표시
+│     ├─ features/cart/    # 장바구니
 │     ├─ pages/
 │     │  ├─ market/
 │     │  └─ admin/
@@ -455,7 +407,6 @@ mini-erp/
 │  └─ perf/                # 정산 성능 측정 스크립트
 ├─ load-test/              # k6 시나리오
 ├─ docs/
-│  └─ DESIGN.md
 └─ docker-compose.yml
 ```
 
@@ -463,24 +414,28 @@ mini-erp/
 
 ## 11. 테스트와 성능 측정 계획
 
-### 정산 프로시저 테스트 (Testcontainers)
-- 출고만 있는 달: 거래처별 합계와 리베이트가 라인별 절사 후 합산값과 일치
-- 월 중간 요율 변경: 변경 전 출고는 이전 요율, 변경 후 출고는 새 요율 적용
-- 지난달 출고분 반품: 반품월에 금액·리베이트 모두 음수로 차감
-- 미리보기 두 번 실행: 결과가 중복되지 않고 동일
-- 마감 후 재실행: 예외 발생, 기존 결과 유지
-- 마감월 반품 등록: 거부
+### 정산 프로시저 테스트
+
+- 출고만 있는 달: 거래처별 합계와 리베이트가 줄별로 버린 뒤 합친 값과 같다
+- 월 중간 요율 변경: 바뀌기 전 출고는 이전 요율, 바뀐 뒤 출고는 새 요율
+- 지난달 출고분 반품: 반품한 달에 금액과 리베이트가 모두 음수로 들어간다
+- 미리보기 두 번: 결과가 쌓이지 않고 같다
+- 마감 후 다시 실행: 거부되고 기존 결과는 그대로다
+- 마감한 달 반품 등록: 거부된다
+
+**[구현]** 위 항목을 모두 `SettlementIntegrationTest`로 만들었다. 진행 중인 달 마감 거부, 미래 달 미리보기 거부, CSV 내용 확인도 더했다.
 
 ### 성능 측정
-`db/seed/perf_seed.sql`로 거래처 200곳, 상품 500개, 6개월 동안 매달 출고 라인 10만 건을 만들고, `db/perf/measure_settlement.sql`로 측정합니다. 측정 스크립트는 단계마다 트랜잭션 안에서 구조를 바꾸고 3번 실행한 뒤 ROLLBACK합니다.
 
-| 단계 | 구조 | 비고 |
-|---|---|---|
-| 1 | 정산용 인덱스 없음, 상세 외래키 있음 | V4 이전 |
-| 2 | 정산용 인덱스 추가 | V4 |
-| 3 | 상세 테이블 외래키 제거 | V5 (현재) |
+거래처 200곳, 상품 500개, 한 달 출고 라인 10만 건을 만들어서 정산 시간을 잰다.
 
-측정 결과와 분석은 README의 "성능 측정"에 정리합니다. 개발 환경에서 측정했을 때 1, 2단계는 비슷했고 3단계에서 실행 시간이 절반 정도로 줄었습니다. `EXPLAIN ANALYZE`로 보면 상세 행 10만 건에 대한 외래키 확인 트리거가 시간의 절반 이상을 차지했습니다.
+| 단계 | 바꾸는 것 |
+|---|---|
+| 1 | 인덱스 없음 |
+| 2 | 출고일·반품일 인덱스 추가 |
+| 3 | 리베이트 정책 조인 개선 |
+
+**[구현]** 3단계는 계획과 달라졌다. 2단계에서 빨라지지 않아서 실행 계획을 단계별로 쪼개 보니, 병목은 정책 조인이 아니라 상세 행 10만 건에 대한 외래키 확인이었다. 그래서 3단계를 "상세 테이블 외래키 제거"로 바꿨다. 데이터는 6개월치(60만 줄)로 늘려서 쟀고, 결과는 README "성능"에 있다.
 
 ---
 
@@ -488,7 +443,9 @@ mini-erp/
 
 | 주차 | 목표 | 완료 기준 |
 |---|---|---|
-| 1주 (~11/3) | React 기초, 프로젝트 세팅, DB 스키마 | Flyway V1 적용, 로그인 화면에서 API 호출 성공 |
-| 2주 (~11/10) | 기준정보, 마켓플레이스 주문 | 거래처 계정으로 주문 등록·조회·취소 |
-| 3주 (~11/17) | 주문 승인·출고·반품, 정산 프로시저 | 정산 미리보기·마감 화면 동작, README 정리 후 **지원** |
-| 4주~ | 테스트, 성능 측정, 동시성 검증, 배포 | 측정표 채우기, k6 결과 README 반영 |
+| 1주 | 프로젝트 세팅, DB 스키마, 로그인 | Flyway V1 적용, 로그인 화면에서 API 호출 성공 |
+| 2주 | 기준정보, 마켓플레이스 주문 | 거래처 계정으로 주문 등록·조회·취소 |
+| 3주 | 주문 승인·출고·반품, 정산 프로시저 | 정산 미리보기·마감 화면 동작 |
+| 4주 | 테스트 보강, 성능 측정, 동시성 검증 | 측정표 채우기, k6 결과 README 반영 |
+
+**[구현]** 4주차에 GitHub Actions CI를 더했다. 배포는 하지 않았다.

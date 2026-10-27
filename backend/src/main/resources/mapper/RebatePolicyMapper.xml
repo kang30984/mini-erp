@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.kang30984.minierp.master.rebate.RebatePolicyMapper">
+
+    <resultMap id="grade" type="io.github.kang30984.minierp.master.rebate.GradeResponse">
+        <constructor>
+            <idArg column="grade_code"      javaType="java.lang.String"/>
+            <arg   column="name"            javaType="java.lang.String"/>
+            <arg   column="current_rate"    javaType="java.math.BigDecimal"/>
+            <arg   column="next_rate"       javaType="java.math.BigDecimal"/>
+            <arg   column="next_valid_from" javaType="java.time.LocalDate"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="policy" type="io.github.kang30984.minierp.master.rebate.RebatePolicyResponse">
+        <constructor>
+            <idArg column="id"          javaType="java.lang.Long"/>
+            <arg   column="grade_code"  javaType="java.lang.String"/>
+            <arg   column="grade_name"  javaType="java.lang.String"/>
+            <arg   column="rebate_rate" javaType="java.math.BigDecimal"/>
+            <arg   column="valid_from"  javaType="java.time.LocalDate"/>
+            <arg   column="valid_to"    javaType="java.time.LocalDate"/>
+            <arg   column="state"       javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="openPolicy" type="io.github.kang30984.minierp.master.rebate.OpenPolicy">
+        <constructor>
+            <idArg column="id"         javaType="java.lang.Long"/>
+            <arg   column="valid_from" javaType="java.time.LocalDate"/>
+        </constructor>
+    </resultMap>
+
+    <select id="existsGrade" resultType="boolean">
+        SELECT EXISTS (SELECT 1 FROM partner_grade WHERE grade_code = #{gradeCode})
+    </select>
+
+    <!-- today는 DB의 current_date 대신 애플리케이션 Clock 기준 날짜를 넘겨받는다 -->
+    <select id="findGrades" resultMap="grade">
+        SELECT g.grade_code,
+               g.name,
+               cur.rebate_rate AS current_rate,
+               nxt.rebate_rate AS next_rate,
+               nxt.valid_from  AS next_valid_from
+          FROM partner_grade g
+          LEFT JOIN rebate_policy cur
+            ON cur.grade_code = g.grade_code
+           AND cur.valid_from &lt;= #{today}
+           AND (cur.valid_to IS NULL OR cur.valid_to &gt; #{today})
+          LEFT JOIN LATERAL (
+                SELECT n.rebate_rate, n.valid_from
+                  FROM rebate_policy n
+                 WHERE n.grade_code = g.grade_code
+                   AND n.valid_from &gt; #{today}
+                 ORDER BY n.valid_from
+                 LIMIT 1
+          ) nxt ON true
+         ORDER BY cur.rebate_rate NULLS LAST, g.grade_code
+    </select>
+
+    <select id="findPolicies" resultMap="policy">
+        SELECT p.id,
+               p.grade_code,
+               g.name AS grade_name,
+               p.rebate_rate,
+               p.valid_from,
+               p.valid_to,
+               CASE
+                   WHEN p.valid_from &gt; #{today} THEN 'SCHEDULED'
+                   WHEN p.valid_to IS NOT NULL AND p.valid_to &lt;= #{today} THEN 'ENDED'
+                   ELSE 'CURRENT'
+               END AS state
+          FROM rebate_policy p
+          JOIN partner_grade g ON g.grade_code = p.grade_code
+        <where>
+            <if test="gradeCode != null">
+                p.grade_code = #{gradeCode}
+            </if>
+        </where>
+         ORDER BY p.grade_code, p.valid_from DESC
+    </select>
+
+    <!-- 잠금 조회는 항상 DB를 거쳐야 하므로 MyBatis 세션 캐시를 쓰지 않는다 -->
+    <select id="findOpenPolicyForUpdate" resultMap="openPolicy" flushCache="true" useCache="false">
+        SELECT id, valid_from
+          FROM rebate_policy
+         WHERE grade_code = #{gradeCode}
+           AND valid_to IS NULL
+           FOR UPDATE
+    </select>
+
+    <update id="closePolicy">
+        UPDATE rebate_policy SET valid_to = #{validTo} WHERE id = #{id}
+    </update>
+
+    <insert id="insertPolicy">
+        INSERT INTO rebate_policy (grade_code, rebate_rate, valid_from)
+        VALUES (#{gradeCode}, #{rebateRate}, #{validFrom})
+    </insert>
+</mapper>

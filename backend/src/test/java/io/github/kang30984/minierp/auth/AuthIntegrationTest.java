@@ -6,36 +6,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.kang30984.minierp.IntegrationTestSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest
-@AutoConfigureMockMvc
-@Testcontainers
-class AuthIntegrationTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @Autowired
-    MockMvc mvc;
+class AuthIntegrationTest extends IntegrationTestSupport {
 
     @Test
     @DisplayName("관리자로 로그인하면 세션으로 내 정보를 조회할 수 있다")
     void adminLoginAndMe() throws Exception {
-        MockHttpSession session = login("admin", "admin1234!");
+        MockHttpSession session = loginAsAdmin();
 
         mvc.perform(get("/api/auth/me").session(session))
                 .andExpect(status().isOk())
@@ -103,19 +85,10 @@ class AuthIntegrationTest {
     @Test
     @DisplayName("거래처 사용자는 관리자 API에 접근할 수 없다")
     void partnerCannotAccessAdminApi() throws Exception {
-        MockHttpSession session = login("partner1", "partner1234!");
+        MockHttpSession session = loginAs("partner1");
 
         mvc.perform(get("/api/admin/orders").session(session))
                 .andExpect(status().isForbidden());
-    }
-
-    private MockHttpSession login(String loginId, String password) throws Exception {
-        MvcResult result = mvc.perform(post("/api/auth/login").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(loginId, password)))
-                .andExpect(status().isOk())
-                .andReturn();
-        return (MockHttpSession) result.getRequest().getSession(false);
     }
 
     private String body(String loginId, String password) {

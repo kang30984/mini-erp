@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.kang30984.minierp.order.OrderMapper">
+
+    <resultMap id="summary" type="io.github.kang30984.minierp.order.OrderSummaryResponse">
+        <constructor>
+            <idArg column="id"                 javaType="java.lang.Long"/>
+            <arg   column="order_no"           javaType="java.lang.String"/>
+            <arg   column="status"             javaType="java.lang.String"/>
+            <arg   column="total_amount"       javaType="java.math.BigDecimal"/>
+            <arg   column="item_count"         javaType="java.lang.Integer"/>
+            <arg   column="first_product_name" javaType="java.lang.String"/>
+            <arg   column="ordered_at"         javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="header" type="io.github.kang30984.minierp.order.OrderHeader">
+        <constructor>
+            <idArg column="id"                 javaType="java.lang.Long"/>
+            <arg   column="order_no"           javaType="java.lang.String"/>
+            <arg   column="partner_id"         javaType="java.lang.Long"/>
+            <arg   column="partner_name"       javaType="java.lang.String"/>
+            <arg   column="partner_grade_code" javaType="java.lang.String"/>
+            <arg   column="status"             javaType="java.lang.String"/>
+            <arg   column="total_amount"       javaType="java.math.BigDecimal"/>
+            <arg   column="ordered_at"         javaType="java.time.LocalDateTime"/>
+            <arg   column="approved_at"        javaType="java.time.LocalDateTime"/>
+            <arg   column="shipped_at"         javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="item" type="io.github.kang30984.minierp.order.OrderItemResponse">
+        <constructor>
+            <arg column="line_no"      javaType="java.lang.Integer"/>
+            <arg column="product_id"   javaType="java.lang.Long"/>
+            <arg column="sku"          javaType="java.lang.String"/>
+            <arg column="product_name" javaType="java.lang.String"/>
+            <arg column="qty"          javaType="java.lang.Integer"/>
+            <arg column="unit_price"   javaType="java.math.BigDecimal"/>
+            <arg column="amount"       javaType="java.math.BigDecimal"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="history" type="io.github.kang30984.minierp.order.OrderHistoryResponse">
+        <constructor>
+            <arg column="from_status"     javaType="java.lang.String"/>
+            <arg column="to_status"       javaType="java.lang.String"/>
+            <arg column="reason"          javaType="java.lang.String"/>
+            <arg column="changed_by_name" javaType="java.lang.String"/>
+            <arg column="changed_at"      javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <!--
+        select 결과는 같은 트랜잭션 안에서 MyBatis 세션 캐시에 저장된다.
+        시퀀스처럼 호출할 때마다 값이 달라야 하는 조회는 캐시를 끄지 않으면 같은 번호가 다시 나온다.
+    -->
+    <select id="nextOrderNo" resultType="string" flushCache="true" useCache="false">
+        SELECT 'SO' || to_char(now(), 'YYYYMMDD') || '-' || lpad(nextval('sales_order_no_seq')::text, 6, '0')
+    </select>
+
+    <insert id="insertOrder" useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO sales_order (order_no, partner_id, partner_grade_code, status, total_amount)
+        VALUES (#{orderNo}, #{partnerId}, #{partnerGradeCode}, 'REQUESTED', #{totalAmount})
+    </insert>
+
+    <insert id="insertItems">
+        INSERT INTO sales_order_item (order_id, line_no, product_id, qty, unit_price, amount)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{orderId}, #{item.lineNo}, #{item.productId}, #{item.qty}, #{item.unitPrice}, #{item.amount})
+        </foreach>
+    </insert>
+
+    <insert id="insertHistory">
+        INSERT INTO order_status_history (order_id, from_status, to_status, reason, changed_by)
+        VALUES (#{orderId}, #{fromStatus}, #{toStatus}, #{reason}, #{changedBy})
+    </insert>
+
+    <select id="countByPartner" resultType="long">
+        SELECT count(*)
+          FROM sales_order o
+         WHERE o.partner_id = #{partnerId}
+        <if test="status != null">
+           AND o.status = #{status}
+        </if>
+    </select>
+
+    <select id="findByPartner" resultMap="summary">
+        SELECT o.id,
+               o.order_no,
+               o.status,
+               o.total_amount,
+               (SELECT count(*) FROM sales_order_item i WHERE i.order_id = o.id) AS item_count,
+               (SELECT p.name
+                  FROM sales_order_item i
+                  JOIN product p ON p.id = i.product_id
+                 WHERE i.order_id = o.id
+                 ORDER BY i.line_no
+                 LIMIT 1) AS first_product_name,
+               o.ordered_at
+          FROM sales_order o
+         WHERE o.partner_id = #{partnerId}
+        <if test="status != null">
+           AND o.status = #{status}
+        </if>
+         ORDER BY o.ordered_at DESC, o.id DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findHeader" resultMap="header">
+        SELECT o.id, o.order_no, o.partner_id, p.name AS partner_name, o.partner_grade_code,
+               o.status, o.total_amount, o.ordered_at, o.approved_at, o.shipped_at
+          FROM sales_order o
+          JOIN partner p ON p.id = o.partner_id
+         WHERE o.id = #{orderId}
+        <if test="partnerId != null">
+           AND o.partner_id = #{partnerId}
+        </if>
+    </select>
+
+    <select id="findItems" resultMap="item">
+        SELECT i.line_no, i.product_id, p.sku, p.name AS product_name, i.qty, i.unit_price, i.amount
+          FROM sales_order_item i
+          JOIN product p ON p.id = i.product_id
+         WHERE i.order_id = #{orderId}
+         ORDER BY i.line_no
+    </select>
+
+    <select id="findHistories" resultMap="history">
+        SELECT h.from_status, h.to_status, h.reason, u.name AS changed_by_name, h.changed_at
+          FROM order_status_history h
+          JOIN app_user u ON u.id = h.changed_by
+         WHERE h.order_id = #{orderId}
+         ORDER BY h.changed_at, h.id
+    </select>
+
+    <update id="cancelRequested">
+        UPDATE sales_order
+           SET status  = 'CANCELED',
+               version = version + 1
+         WHERE id = #{orderId}
+           AND partner_id = #{partnerId}
+           AND status = 'REQUESTED'
+    </update>
+</mapper>

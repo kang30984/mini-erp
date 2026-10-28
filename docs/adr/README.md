@@ -12,3 +12,5 @@
 | [006](006-approval-locking.md) | 승인 처리의 잠금 순서와 버전 확인 |
 | [007](007-return-qty-check.md) | 반품 수량은 잠근 뒤 다음 문장에서 센다 |
 | [008](008-session-and-csrf.md) | 세션 로그인과 쿠키 기반 CSRF |
+| [009](009-settlement-month-lock.md) | 월 경계에서 마감과 출고가 겹칠 때 정산월 잠금 |
+| [010](010-product-stock-compare-and-set.md) | 상품 수정에서 재고는 비교 후 교체 |

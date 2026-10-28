@@ -26,8 +26,7 @@ public class GlobalExceptionHandler {
 
     /**
      * 비밀번호 오류, 없는 계정, 사용 중지 계정을 모두 같은 메시지로 응답한다.
-     * DaoAuthenticationProvider는 비밀번호 확인 전에 계정 상태를 먼저 검사하므로,
-     * 메시지를 나누면 비밀번호를 몰라도 계정 존재 여부를 알 수 있게 된다.
+     * 응답 시간도 같아야 해서, 계정 상태 검사는 비밀번호 확인 뒤에 한다 (SecurityConfig.loginProvider).
      */
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException e) {

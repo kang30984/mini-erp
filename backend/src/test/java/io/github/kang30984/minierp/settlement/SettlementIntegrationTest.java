@@ -166,6 +166,63 @@ class SettlementIntegrationTest extends IntegrationTestSupport {
                 .hasMessageContaining("마감된 정산월");
     }
 
+    /** 지난달 출고 주문 하나를 만들고 지난달 정산을 마감한다 */
+    private JsonNode closedLastMonthOrder() throws Exception {
+        JsonNode order = shippedLastMonth(partner1, "NB-14-001", 1, 3);
+        mvc.perform(post("/api/admin/settlements/{m}/preview", prev).with(csrf()).session(admin));
+        mvc.perform(post("/api/admin/settlements/{m}/close", prev).with(csrf()).session(admin))
+                .andExpect(status().isOk());
+        return order;
+    }
+
+    @Test
+    @DisplayName("마감된 달에 출고된 주문 줄의 금액은 SQL로 직접 바꿔도 DB 트리거가 막는다")
+    void triggerBlocksItemChangeInClosedMonth() throws Exception {
+        JsonNode order = closedLastMonthOrder();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE sales_order_item SET amount = 1 WHERE order_id = ?", order.get("id").asLong()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("마감된 정산월");
+    }
+
+    @Test
+    @DisplayName("마감된 달 출고일을 가진 주문은 SQL로 직접 넣어도 DB 트리거가 막는다")
+    void triggerBlocksOrderInsertInClosedMonth() throws Exception {
+        closedLastMonthOrder();
+        LocalDateTime inClosedMonth = previous.atDay(20).atTime(9, 0);
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO sales_order (order_no, partner_id, partner_grade_code, status, total_amount, shipped_at) "
+                        + "SELECT 'SO-TEST-CLOSED', id, grade_code, 'SHIPPED', 1290000, ? FROM partner WHERE code = 'P0001'",
+                inClosedMonth))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("마감된 정산월");
+    }
+
+    @Test
+    @DisplayName("마감된 달에 적용되던 리베이트 요율은 SQL로 직접 바꿔도 DB 트리거가 막는다")
+    void triggerBlocksRateChangeCoveringClosedMonth() throws Exception {
+        closedLastMonthOrder();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE rebate_policy SET rebate_rate = 0.05 WHERE grade_code = 'GOLD'"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("리베이트 정책");
+    }
+
+    @Test
+    @DisplayName("마감 후에도 내일부터 적용할 새 요율은 등록할 수 있다")
+    void futureRateCanBeRegisteredAfterClose() throws Exception {
+        closedLastMonthOrder();
+
+        mvc.perform(post("/api/admin/rebate-policies").with(csrf()).session(admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("gradeCode", "GOLD", "rebateRate", 0.025,
+                                "validFrom", current.atDay(1).plusMonths(1).toString()))))
+                .andExpect(status().isCreated());
+    }
+
     @Test
     @DisplayName("진행 중인 달은 마감할 수 없고, 미래 달은 미리보기도 할 수 없다")
     void monthRules() throws Exception {

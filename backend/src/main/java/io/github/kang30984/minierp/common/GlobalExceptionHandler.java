@@ -2,6 +2,7 @@ package io.github.kang30984.minierp.common;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException e) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse("LOGIN_FAILED", "아이디 또는 비밀번호가 올바르지 않습니다."));
+    }
+
+    /**
+     * 마감월 보호 트리거(assert_month_open)가 거부한 경우.
+     * 서비스가 먼저 막지만, 월이 바뀌는 순간 마감과 출고·반품이 겹치면 DB에서 거부될 수 있다(V7).
+     * 출고일은 트랜잭션 시작 시각이라 다시 시도하면 이번 달로 처리되므로 500 대신 409로 알린다.
+     * 그 밖의 무결성 위반은 예상하지 못한 오류로 처리한다.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleIntegrity(DataIntegrityViolationException e) {
+        String cause = String.valueOf(e.getMostSpecificCause().getMessage());
+        if (cause.contains("마감된 정산월")) {
+            log.warn("마감월 데이터 변경 거부: {}", cause.lines().findFirst().orElse(cause));
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ErrorResponse("CLOSED_MONTH",
+                            "이미 마감된 달의 데이터라 처리하지 못했습니다. 월이 바뀌는 시점이었다면 다시 시도해 주세요."));
+        }
+        return handleUnexpected(e);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

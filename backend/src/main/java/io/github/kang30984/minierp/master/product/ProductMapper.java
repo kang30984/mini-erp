@@ -40,10 +40,17 @@ public interface ProductMapper {
 
     int increaseStock(@Param("productId") long productId, @Param("qty") int qty);
 
+    /**
+     * 상품 정보를 수정한다.
+     * stockChanged가 false면 재고 칼럼은 그대로 두고, true면 현재 재고가 baseStockQty와 같을 때만 stockQty로 바꾼다.
+     * 영향받은 행이 0이면 상품이 없거나, 화면을 연 뒤 다른 처리(승인, 취소, 반품)로 재고가 바뀐 것이다.
+     */
     int update(@Param("id") long id,
                @Param("name") String name,
                @Param("category") String category,
                @Param("unitPrice") BigDecimal unitPrice,
+               @Param("stockChanged") boolean stockChanged,
                @Param("stockQty") int stockQty,
+               @Param("baseStockQty") int baseStockQty,
                @Param("status") String status);
 }

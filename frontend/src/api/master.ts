@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { request, toQuery } from './client'
+import { ApiError, request, toQuery } from './client'
 import type { PageResponse } from '../types/common'
 import type {
   Grade,
@@ -38,6 +38,12 @@ export function useSaveProduct() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'products'] })
       queryClient.invalidateQueries({ queryKey: ['market', 'products'] })
+    },
+    onError: (error) => {
+      // 화면을 연 뒤 재고가 바뀐 경우. 목록을 다시 받아서 새로 연 화면에는 최신 재고가 보이게 한다
+      if (error instanceof ApiError && error.code === 'STALE_STOCK') {
+        queryClient.invalidateQueries({ queryKey: ['admin', 'products'] })
+      }
     },
   })
 }

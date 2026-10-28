@@ -20,6 +20,8 @@ export interface ProductForm {
   unitPrice: number
   stockQty: number
   status: ProductStatus
+  /** 수정할 때만 보낸다. 화면이 상품을 불러왔을 때의 재고. 서버는 DB 재고가 이 값과 같을 때만 재고를 바꾼다 */
+  baseStockQty?: number
 }
 
 export interface Partner {

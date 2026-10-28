@@ -87,14 +87,25 @@
          WHERE id = #{productId}
     </update>
 
+    <!--
+        재고는 덮어쓰지 않고 비교 후 교체(compare-and-set)한다.
+        화면을 열어 둔 사이 승인으로 재고가 줄었는데 예전 숫자로 저장하면 재고가 되살아나 초과 판매로 이어진다.
+        - 재고를 바꾸지 않은 수정(이름, 단가, 상태): 재고 칼럼을 건드리지 않으므로 승인과 부딪히지 않는다
+        - 재고를 바꾼 수정: DB 재고가 화면이 본 값(baseStockQty)과 같을 때만 바꾼다
+    -->
     <update id="update">
         UPDATE product
            SET name       = #{name},
                category   = #{category},
                unit_price = #{unitPrice},
+        <if test="stockChanged">
                stock_qty  = #{stockQty},
+        </if>
                status     = #{status},
                updated_at = now()
          WHERE id = #{id}
+        <if test="stockChanged">
+           AND stock_qty = #{baseStockQty}
+        </if>
     </update>
 </mapper>

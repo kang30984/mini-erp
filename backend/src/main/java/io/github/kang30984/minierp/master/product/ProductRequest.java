@@ -11,6 +11,10 @@ import java.math.BigDecimal;
 
 /**
  * 상품 등록·수정 요청. 수정할 때 sku는 바꾸지 않는다(주문 이력과 연결되는 코드라서).
+ *
+ * <p>baseStockQty는 수정할 때만 쓴다. 화면이 상품을 불러왔을 때의 재고 수량이다.
+ * 재고를 바꾸지 않았으면 재고 칼럼은 건드리지 않고, 바꿨으면 DB 재고가 이 값과 같을 때만 바꾼다.
+ * 화면을 열어 둔 사이 승인으로 재고가 줄었는데 예전 숫자로 덮어써서 재고가 되살아나는 것을 막는다.
  */
 public record ProductRequest(
         @NotBlank(message = "상품 코드를 입력해 주세요.")
@@ -39,6 +43,9 @@ public record ProductRequest(
 
         @NotBlank(message = "판매 상태를 선택해 주세요.")
         @Pattern(regexp = "ON_SALE|STOPPED", message = "판매 상태 값이 올바르지 않습니다.")
-        String status
+        String status,
+
+        @PositiveOrZero(message = "기준 재고 수량은 0 이상이어야 합니다.")
+        Integer baseStockQty
 ) {
 }

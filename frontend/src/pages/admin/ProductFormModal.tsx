@@ -30,7 +30,10 @@ export default function ProductFormModal({ product, onDone }: Props) {
   })
 
   const onSubmit = handleSubmit((form) => {
-    save.mutate({ id: product?.id, form: { ...form, sku: form.sku.trim().toUpperCase() } }, { onSuccess: onDone })
+    // 수정할 때는 불러왔을 때의 재고를 같이 보낸다. 그 사이 승인 등으로 재고가 바뀌었으면 서버가 409로 거절한다
+    const payload: ProductForm = { ...form, sku: form.sku.trim().toUpperCase() }
+    if (product) payload.baseStockQty = product.stockQty
+    save.mutate({ id: product?.id, form: payload }, { onSuccess: onDone })
   })
 
   return (

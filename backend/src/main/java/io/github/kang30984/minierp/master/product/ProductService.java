@@ -51,12 +51,25 @@ public class ProductService {
         return productMapper.findBySku(request.sku()).orElseThrow();
     }
 
+    /**
+     * 상품 수정. 재고는 화면이 불러온 값(baseStockQty)을 기준으로 비교 후 교체한다.
+     * 재고를 바꾸지 않았으면 재고 칼럼을 건드리지 않고, 바꿨는데 그 사이 승인·취소·반품으로 재고가 달라졌으면
+     * 덮어쓰지 않고 409로 알린다. 예전 숫자로 덮어쓰면 승인으로 줄어든 재고가 되살아나 초과 판매가 생긴다.
+     */
     @Transactional
     public ProductResponse update(long id, ProductRequest request) {
-        int updated = productMapper.update(id, request.name().strip(), request.category(),
-                request.unitPrice(), request.stockQty(), request.status());
+        if (request.baseStockQty() == null) {
+            throw BusinessException.badRequest("BASE_STOCK_REQUIRED",
+                    "상품을 불러왔을 때의 재고 수량(baseStockQty)이 필요합니다. 화면을 새로 고친 뒤 다시 저장해 주세요.");
+        }
+        boolean stockChanged = !request.stockQty().equals(request.baseStockQty());
+        int updated = productMapper.update(id, request.name().strip(), request.category(), request.unitPrice(),
+                stockChanged, request.stockQty(), request.baseStockQty(), request.status());
         if (updated == 0) {
-            throw BusinessException.notFound("상품을 찾을 수 없습니다.");
+            ProductResponse current = get(id);
+            throw BusinessException.conflict("STALE_STOCK",
+                    "화면을 연 뒤 주문 처리로 재고가 %d개에서 %d개로 바뀌었습니다. 화면을 새로 고친 뒤 다시 입력해 주세요."
+                            .formatted(request.baseStockQty(), current.stockQty()));
         }
         return get(id);
     }

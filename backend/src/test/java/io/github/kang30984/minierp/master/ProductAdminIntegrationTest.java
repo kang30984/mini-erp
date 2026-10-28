@@ -1,5 +1,6 @@
 package io.github.kang30984.minierp.master;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -85,6 +86,8 @@ class ProductAdminIntegrationTest extends IntegrationTestSupport {
         Map<String, Object> body = product("CHANGED-SKU");
         body.put("name", "24형 FHD 모니터 (단종)");
         body.put("status", "STOPPED");
+        body.put("stockQty", stockOf(id));
+        body.put("baseStockQty", stockOf(id));
 
         mvc.perform(put("/api/admin/products/{id}", id).with(csrf()).session(loginAsAdmin())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -112,5 +115,66 @@ class ProductAdminIntegrationTest extends IntegrationTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(product("KB-TEST-03"))))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---------- 재고 비교 후 교체 ----------
+
+    @Test
+    @DisplayName("화면을 연 뒤 승인 등으로 재고가 바뀌었으면, 예전 숫자로 재고를 덮어쓰지 않고 409로 거절한다")
+    void staleStockIsRejected() throws Exception {
+        long id = productId("MN-24-FHD");
+        int seen = stockOf(id);
+        // 관리자가 수정 화면을 연 뒤 다른 관리자의 승인으로 재고 3개가 차감됐다
+        jdbcTemplate.update("UPDATE product SET stock_qty = stock_qty - 3 WHERE id = ?", id);
+
+        Map<String, Object> body = product("MN-24-FHD");
+        body.put("stockQty", seen + 10);      // 화면에서 본 숫자를 기준으로 입고 10개를 더했다고 생각하고 저장
+        body.put("baseStockQty", seen);
+
+        mvc.perform(put("/api/admin/products/{id}", id).with(csrf()).session(loginAsAdmin())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STALE_STOCK"));
+
+        // 덮어쓰지 않았으므로 승인으로 줄어든 재고가 그대로다
+        assertThat(stockOf(id)).isEqualTo(seen - 3);
+    }
+
+    @Test
+    @DisplayName("재고를 바꾸지 않은 수정은 그 사이 재고가 바뀌어도 성공하고, 재고 칼럼은 건드리지 않는다")
+    void editWithoutStockChangeKeepsCurrentStock() throws Exception {
+        long id = productId("MN-24-FHD");
+        int seen = stockOf(id);
+        jdbcTemplate.update("UPDATE product SET stock_qty = stock_qty - 3 WHERE id = ?", id);
+
+        Map<String, Object> body = product("MN-24-FHD");
+        body.put("name", "24형 FHD 모니터 (가격 인하)");
+        body.put("stockQty", seen);
+        body.put("baseStockQty", seen);
+
+        mvc.perform(put("/api/admin/products/{id}", id).with(csrf()).session(loginAsAdmin())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("24형 FHD 모니터 (가격 인하)"))
+                .andExpect(jsonPath("$.stockQty").value(seen - 3));
+    }
+
+    @Test
+    @DisplayName("수정 요청에 기준 재고가 없으면 400")
+    void baseStockRequiredOnUpdate() throws Exception {
+        long id = productId("MN-24-FHD");
+        Map<String, Object> body = product("MN-24-FHD");
+
+        mvc.perform(put("/api/admin/products/{id}", id).with(csrf()).session(loginAsAdmin())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BASE_STOCK_REQUIRED"));
+    }
+
+    private int stockOf(long id) {
+        return jdbcTemplate.queryForObject("SELECT stock_qty FROM product WHERE id = ?", Integer.class, id);
     }
 }

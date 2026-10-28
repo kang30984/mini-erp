@@ -131,6 +131,28 @@ class SettlementIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("한 줄을 여러 번 나눠 전량 반품하면 되돌린 리베이트 합계가 출고 리베이트와 정확히 같다")
+    void partialReturnsRefundExactRebate() throws Exception {
+        // 389,000원 × 3개, 요율 3.33%: 출고 리베이트 floor(1,167,000 × 0.0333) = 38,861
+        // 반품마다 따로 버리면 floor(389,000 × 0.0333) = 12,953 × 3 = 38,859라서 2원이 남았다
+        jdbcTemplate.update("UPDATE rebate_policy SET rebate_rate = 0.0333 WHERE grade_code = 'GOLD'");
+        JsonNode order = shippedLastMonth(partner1, "MN-27-QHD", 3, 10);
+
+        for (int i = 0; i < 3; i++) {
+            mvc.perform(post("/api/admin/orders/{id}/returns", order.get("id").asLong()).with(csrf()).session(admin)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(Map.of("lineNo", 1, "qty", 1, "reason", "부분 반품"))))
+                    .andExpect(status().isCreated());
+        }
+
+        mvc.perform(post("/api/admin/settlements/{m}/preview", prev).with(csrf()).session(admin))
+                .andExpect(jsonPath("$.summaries[0].rebateAmount").value(38_861));
+        mvc.perform(post("/api/admin/settlements/{m}/preview", now).with(csrf()).session(admin))
+                .andExpect(jsonPath("$.summaries[0].returnAmount").value(1_167_000))
+                .andExpect(jsonPath("$.summaries[0].rebateAmount").value(-38_861));
+    }
+
+    @Test
     @DisplayName("마감하면 다시 실행할 수 없다")
     void closeThenRerun() throws Exception {
         shippedLastMonth(partner1, "NB-14-001", 1, 3);
